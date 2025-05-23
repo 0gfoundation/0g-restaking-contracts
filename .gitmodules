@@ -13,3 +13,6 @@
 [submodule "lib/core"]
 	path = lib/core
 	url = https://github.com/symbioticfi/core
+[submodule "lib/middleware-sdk"]
+	path = lib/middleware-sdk
+	url = https://github.com/symbioticfi/middleware-sdk
