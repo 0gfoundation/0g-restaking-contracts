@@ -1,0 +1,17 @@
+@crypto-lib/=lib/middleware-sdk/lib/crypto-lib/src/
+@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/
+@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+@solidity/=lib/middleware-sdk/lib/crypto-lib/src/
+@symbiotic-test/=lib/middleware-sdk/lib/core/test/
+@symbiotic/=lib/middleware-sdk/lib/core/src/
+@symbioticfi/core/=lib/rewards/lib/core/
+core/=lib/core/
+crypto-lib/=lib/middleware-sdk/lib/crypto-lib/
+ds-test/=lib/core/lib/openzeppelin-contracts-upgradeable/lib/forge-std/lib/ds-test/src/
+erc4626-tests/=lib/openzeppelin-contracts-upgradeable/lib/erc4626-tests/
+forge-std/=lib/forge-std/src/
+halmos-cheatcodes/=lib/openzeppelin-contracts-upgradeable/lib/halmos-cheatcodes/src/
+middleware-sdk/=lib/middleware-sdk/src/
+openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/
+openzeppelin-contracts/=lib/openzeppelin-contracts/
+rewards/=lib/rewards/

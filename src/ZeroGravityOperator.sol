@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.13;
+
+import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+
+import {IOperatorRegistry} from "@symbiotic/interfaces/IOperatorRegistry.sol";
+import {IOptInService} from "@symbiotic/interfaces/service/IOptInService.sol";
+
+import {IZeroGravityOperator} from "./interfaces/IZeroGravityOperator.sol";
+
+contract ZeroGravityOperator is IZeroGravityOperator, AccessControlUpgradeable {
+    constructor(address operatorRegistry) {
+        initialize(operatorRegistry);
+    }
+
+    function initialize(address operatorRegistry) public initializer {
+        __AccessControl_init();
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+
+        IOperatorRegistry(operatorRegistry).registerOperator();
+    }
+
+    function optIn(
+        address operatorVaultOptInService,
+        address vault,
+        address operatorNetworkOptInService,
+        address network
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        IOptInService(operatorVaultOptInService).optIn(vault);
+        IOptInService(operatorNetworkOptInService).optIn(network);
+    }
+}

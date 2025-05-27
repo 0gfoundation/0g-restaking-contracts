@@ -1,0 +1,169 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.13;
+
+import {IVault} from "@symbiotic/interfaces/vault/IVault.sol";
+import {IBaseDelegator} from "@symbiotic/interfaces/delegator/IBaseDelegator.sol";
+import {IVetoSlasher} from "@symbiotic/interfaces/slasher/IVetoSlasher.sol";
+import {Subnetwork} from "@symbiotic/contracts/libraries/Subnetwork.sol";
+
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+
+import {KeyManagerBytes} from "middleware-sdk/extensions/managers/keys/KeyManagerBytes.sol";
+import {OzAccessControl} from "middleware-sdk/extensions/managers/access/OzAccessControl.sol";
+import {Operators} from "middleware-sdk/extensions/operators/Operators.sol";
+import {EpochCapture} from "middleware-sdk/extensions/managers/capture-timestamps/EpochCapture.sol";
+import {SharedVaults} from "middleware-sdk/extensions/SharedVaults.sol";
+import {EqualStakePower} from "middleware-sdk/extensions/managers/stake-powers/EqualStakePower.sol";
+import {KeyManagerBytes} from "middleware-sdk/extensions/managers/keys/KeyManagerBytes.sol";
+
+import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddlewareInterface.sol";
+
+contract ZeroGravityMiddleware is
+    IZeroGravityMiddleware,
+    SharedVaults,
+    KeyManagerBytes,
+    Operators,
+    EpochCapture,
+    OzAccessControl,
+    EqualStakePower
+{
+    using Subnetwork for address;
+
+    /// @custom:storage-location erc7201:0g.storage.ZeroGravityMiddleware
+    struct ZeroGravityMiddlewareStorage {
+        address resolver; // resolver for veto slashing
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("0g.storage.ZeroGravityMiddleware")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant ZeroGravityMiddlewareStorageLocation =
+        0xac44c5fd66003021ef4b929366b736fca6f51990a213b46844b02b2973a39d00;
+
+    function _getZeroGravityMiddlewareStorage() internal pure returns (ZeroGravityMiddlewareStorage storage $) {
+        assembly {
+            $.slot := ZeroGravityMiddlewareStorageLocation
+        }
+    }
+
+    /**
+     * @notice Constructor for initializing the SimplePosMiddleware contract
+     * @param network The address of the network, should be 0g factory
+     * @param slashingWindow The duration of the slashing window
+     * @param vaultRegistry The address of the vault registry
+     * @param operatorRegistry The address of the operator registry
+     * @param operatorNetOptin The address of the operator network opt-in service
+     * @param reader The address of the reader contract used for delegatecall
+     * @param defaultAdmin The address of the default admin
+     * @param epochDuration The duration of each epoch
+     */
+    constructor(
+        address network,
+        uint48 slashingWindow,
+        address vaultRegistry,
+        address operatorRegistry,
+        address operatorNetOptin,
+        address reader,
+        address defaultAdmin,
+        uint48 epochDuration
+    ) {
+        initialize(
+            network,
+            slashingWindow,
+            vaultRegistry,
+            operatorRegistry,
+            operatorNetOptin,
+            reader,
+            defaultAdmin,
+            epochDuration
+        );
+    }
+
+    function initialize(
+        address network,
+        uint48 slashingWindow,
+        address vaultRegistry,
+        address operatorRegistry,
+        address operatorNetOptin,
+        address reader,
+        address defaultAdmin,
+        uint48 epochDuration
+    ) internal initializer {
+        __BaseMiddleware_init(network, slashingWindow, vaultRegistry, operatorRegistry, operatorNetOptin, reader);
+        __OzAccessControl_init(defaultAdmin);
+        __EpochCapture_init(epochDuration);
+    }
+
+    /* 
+     * @notice Slashes a validator based on the provided parameters.
+     * Here are the hints getter
+     * https://github.com/symbioticfi/core/blob/main/src/contracts/hints/VetoSlasherHints.sol
+     * https://github.com/symbioticfi/core/blob/main/src/contracts/hints/DelegatorHints.sol
+     * @param epoch The epoch for which the slashing occurs.
+     * @param key The key of the operator to slash.
+     * @param amount The amount to slash.
+     * @param stakeHints Hints for determining stakes.
+     * @param slashHints Hints for the slashing process.
+     */
+    function slash(
+        uint48 epoch,
+        bytes32 key,
+        uint256 amount,
+        bytes[][] memory stakeHints,
+        bytes[] memory slashHints
+    ) public checkAccess {
+        SlashParams memory params;
+        params.epochStart = getEpochStart(epoch);
+        params.operator = operatorByKey(abi.encode(key));
+
+        _checkCanSlash(params.epochStart, key, params.operator);
+
+        params.vaults = _activeVaultsAt(params.epochStart, params.operator);
+        params.subnetworks = _activeSubnetworksAt(params.epochStart);
+        params.totalPower = _getOperatorPowerAt(params.epochStart, params.operator, params.vaults, params.subnetworks);
+        uint256 vaultsLength = params.vaults.length;
+        uint256 subnetworksLength = params.subnetworks.length;
+
+        // Validate hints lengths upfront
+        if (stakeHints.length != slashHints.length || stakeHints.length != vaultsLength) {
+            revert InvalidHints();
+        }
+
+        for (uint256 i; i < vaultsLength; ++i) {
+            if (stakeHints[i].length != subnetworksLength) {
+                revert InvalidHints();
+            }
+
+            address vault = params.vaults[i];
+            for (uint256 j; j < subnetworksLength; ++j) {
+                bytes32 subnetwork = _NETWORK().subnetwork(uint96(params.subnetworks[j]));
+                uint256 stake = IBaseDelegator(IVault(vault).delegator()).stakeAt(
+                    subnetwork, params.operator, params.epochStart, stakeHints[i][j]
+                );
+
+                uint256 slashAmount = Math.mulDiv(amount, stakeToPower(vault, stake), params.totalPower);
+                if (slashAmount == 0) {
+                    continue;
+                }
+
+                _slashVault(params.epochStart, vault, subnetwork, params.operator, slashAmount, slashHints[i]);
+            }
+        }
+    }
+
+    function executeSlash(address vault, uint256 slashIndex, bytes memory hints) external checkAccess {
+        _executeSlash(vault, slashIndex, hints);
+    }
+
+    function _checkCanSlash(uint48 epochStart, bytes32 key, address operator) internal view {
+        if (operator == address(0)) {
+            revert NotExistKeySlash(); // Revert if the operator does not exist
+        }
+
+        if (!keyWasActiveAt(epochStart, abi.encode(key))) {
+            revert InactiveKeySlash(); // Revert if the key is inactive
+        }
+
+        if (!_operatorWasActiveAt(epochStart, operator)) {
+            revert InactiveOperatorSlash(); // Revert if the operator wasn't active
+        }
+    }
+}
