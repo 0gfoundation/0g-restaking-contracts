@@ -16,7 +16,7 @@ import {SharedVaults} from "middleware-sdk/extensions/SharedVaults.sol";
 import {EqualStakePower} from "middleware-sdk/extensions/managers/stake-powers/EqualStakePower.sol";
 import {KeyManagerBytes} from "middleware-sdk/extensions/managers/keys/KeyManagerBytes.sol";
 
-import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddlewareInterface.sol";
+import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddleware.sol";
 
 contract ZeroGravityMiddleware is
     IZeroGravityMiddleware,
@@ -44,52 +44,17 @@ contract ZeroGravityMiddleware is
         }
     }
 
-    /**
-     * @notice Constructor for initializing the SimplePosMiddleware contract
-     * @param network The address of the network, should be 0g factory
-     * @param slashingWindow The duration of the slashing window
-     * @param vaultRegistry The address of the vault registry
-     * @param operatorRegistry The address of the operator registry
-     * @param operatorNetOptin The address of the operator network opt-in service
-     * @param reader The address of the reader contract used for delegatecall
-     * @param defaultAdmin The address of the default admin
-     * @param epochDuration The duration of each epoch
-     */
-    constructor(
-        address network,
-        uint48 slashingWindow,
-        address vaultRegistry,
-        address operatorRegistry,
-        address operatorNetOptin,
-        address reader,
-        address defaultAdmin,
-        uint48 epochDuration
-    ) {
-        initialize(
-            network,
-            slashingWindow,
-            vaultRegistry,
-            operatorRegistry,
-            operatorNetOptin,
-            reader,
-            defaultAdmin,
-            epochDuration
-        );
-    }
+    function initialize(bytes memory params) external initializer {
+        InitParams memory p;
+        p = abi.decode(params, (InitParams));
 
-    function initialize(
-        address network,
-        uint48 slashingWindow,
-        address vaultRegistry,
-        address operatorRegistry,
-        address operatorNetOptin,
-        address reader,
-        address defaultAdmin,
-        uint48 epochDuration
-    ) internal initializer {
-        __BaseMiddleware_init(network, slashingWindow, vaultRegistry, operatorRegistry, operatorNetOptin, reader);
-        __OzAccessControl_init(defaultAdmin);
-        __EpochCapture_init(epochDuration);
+        __BaseMiddleware_init(
+            p.network, p.slashingWindow, p.vaultRegistry, p.operatorRegistry, p.operatorNetOptin, p.reader
+        );
+        __OzAccessControl_init(p.defaultAdmin);
+        __EpochCapture_init(p.epochDuration);
+
+        _setSelectorRole(Operators.registerOperator.selector, DEFAULT_ADMIN_ROLE);
     }
 
     /* 

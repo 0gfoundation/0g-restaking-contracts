@@ -9,11 +9,7 @@ import {IOptInService} from "@symbiotic/interfaces/service/IOptInService.sol";
 import {IZeroGravityOperator} from "./interfaces/IZeroGravityOperator.sol";
 
 contract ZeroGravityOperator is IZeroGravityOperator, AccessControlUpgradeable {
-    constructor(address operatorRegistry) {
-        initialize(operatorRegistry);
-    }
-
-    function initialize(address operatorRegistry) public initializer {
+    function initialize(address operatorRegistry) external initializer {
         __AccessControl_init();
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
 

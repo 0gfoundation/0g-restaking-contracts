@@ -7,7 +7,6 @@ interface IZeroGravityFactory {
     error OperatorCreated(); // Error thrown when try to create duplicate operators for the same pubkey
 
     struct InitParams {
-        address middleware;
         address vaultConfigurator;
         uint64 vaultVersion;
         uint64 delegatorVersion;

@@ -15,6 +15,7 @@ import {IVetoSlasher} from "@symbiotic/interfaces/slasher/IVetoSlasher.sol";
 import {IBaseSlasher} from "@symbiotic/interfaces/slasher/IBaseSlasher.sol";
 import {IVault} from "@symbiotic/interfaces/vault/IVault.sol";
 import {INetworkRegistry} from "@symbiotic/interfaces/INetworkRegistry.sol";
+import {INetworkMiddlewareService} from "@symbiotic/interfaces/service/INetworkMiddlewareService.sol";
 
 import {IOperators} from "middleware-sdk/interfaces/extensions/operators/IOperators.sol";
 
@@ -63,11 +64,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
     bytes32 public constant UPDATE_COLLATERAL_ROLE = keccak256("UPDATE_COLLATERAL_ROLE");
     uint96 internal constant DEFAULT_SUBNETWORK = 0;
 
-    constructor(bytes memory params) {
-        initialize(params);
-    }
-
-    function initialize(bytes memory params) internal initializer {
+    function initialize(bytes memory params) external initializer {
         __AccessControl_init();
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
 
@@ -75,7 +72,6 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         p = abi.decode(params, (InitParams));
 
         ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
-        $.middleware = p.middleware;
         $.vaultConfigurator = p.vaultConfigurator;
         $.vaultVersion = p.vaultVersion;
         $.delegatorVersion = p.delegatorVersion;
@@ -89,8 +85,15 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         $.defaultStakerRewardsFactory = p.defaultStakerRewardsFactory;
     }
 
-    function registerNetwork(address networkRegistry) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function registerNetwork(
+        address middleware,
+        address networkRegistry,
+        address networkMiddlewareService
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        $.middleware = middleware;
         INetworkRegistry(networkRegistry).registerNetwork();
+        INetworkMiddlewareService(networkMiddlewareService).setMiddleware(middleware);
     }
 
     function updateCollateralConfig(
