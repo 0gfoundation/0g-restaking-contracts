@@ -20,7 +20,10 @@ interface IZeroGravityFactory {
         address resolver;
         address operatorVaultOptInService;
         address operatorNetworkOptInService;
+        address defaultStakerRewardsFactory;
     }
 
-    event ValidatorCreated(bytes pubkey, bytes signature, address collateral, address vault, address operator);
+    event ValidatorCreated(
+        bytes pubkey, bytes signature, address collateral, address vault, address operator, address rewards
+    );
 }

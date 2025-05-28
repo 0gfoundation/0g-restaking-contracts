@@ -18,6 +18,10 @@ import {INetworkRegistry} from "@symbiotic/interfaces/INetworkRegistry.sol";
 
 import {IOperators} from "middleware-sdk/interfaces/extensions/operators/IOperators.sol";
 
+import {IDefaultStakerRewardsFactory} from
+    "rewards/src/interfaces/defaultStakerRewards/IDefaultStakerRewardsFactory.sol";
+import {IDefaultStakerRewards} from "rewards/src/interfaces/defaultStakerRewards/IDefaultStakerRewards.sol";
+
 import {IZeroGravityFactory} from "./interfaces/IZeroGravityFactory.sol";
 import {IZeroGravityOperator} from "./interfaces/IZeroGravityOperator.sol";
 
@@ -41,6 +45,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         address resolver; // veto slash resolver
         address operatorVaultOptInService; // symbiotic operator -> vault opt in service
         address operatorNetworkOptInService; // symbiotic operator -> network opt in service
+        address defaultStakerRewardsFactory; // symbiotic default staker rewards factory
         EnumerableMap.AddressToUintMap minValidatorDeposit; // minimal amount to deposit when create validator
         mapping(bytes32 => bool) created; // create2 salt used
     }
@@ -81,6 +86,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         $.resolver = p.resolver;
         $.operatorVaultOptInService = p.operatorVaultOptInService;
         $.operatorNetworkOptInService = p.operatorNetworkOptInService;
+        $.defaultStakerRewardsFactory = p.defaultStakerRewardsFactory;
     }
 
     function registerNetwork(address networkRegistry) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -179,7 +185,17 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         );
         // register operator and vault to middleware
         IOperators($.middleware).registerOperator(operator, pubkey, vault);
+        // staker rewards
+        address rewards = IDefaultStakerRewardsFactory($.defaultStakerRewardsFactory).create(
+            IDefaultStakerRewards.InitParams({
+                vault: vault,
+                adminFee: 0,
+                defaultAdminRoleHolder: address(this),
+                adminFeeClaimRoleHolder: address(0),
+                adminFeeSetRoleHolder: address(0)
+            })
+        );
 
-        emit ValidatorCreated(pubkey, signature, collateral, vault, operator);
+        emit ValidatorCreated(pubkey, signature, collateral, vault, operator, rewards);
     }
 }
