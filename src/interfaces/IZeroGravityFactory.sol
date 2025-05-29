@@ -3,7 +3,7 @@ pragma solidity ^0.8.13;
 
 interface IZeroGravityFactory {
     error InvalidCollateral(); // Error thrown when get unregistered collateral
-    error InsufficientCollateral(uint256, uint256); // Error thrown when given amount is smaller than minimal deposit at validator creation
+    error InsufficientCollateral(); // Error thrown when given amount is smaller than minimal deposit at validator creation
     error OperatorCreated(); // Error thrown when try to create duplicate operators for the same pubkey
 
     struct InitParams {

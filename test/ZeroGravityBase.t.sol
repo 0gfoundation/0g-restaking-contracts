@@ -34,9 +34,14 @@ import {IZeroGravityMiddleware} from "../src/interfaces/IZeroGravityMiddleware.s
 import {ZeroGravityFactory} from "../src/ZeroGravityFactory.sol";
 import {ZeroGravityMiddleware} from "../src/ZeroGravityMiddleware.sol";
 import {ZeroGravityOperator} from "../src/ZeroGravityOperator.sol";
-import {VaultRegistry} from "../src/VaultRegistry.sol";
 
 contract ZeroGravityBaseTest is Test {
+    uint48 public constant VAULT_EPOCH_DURATION = 2 weeks;
+    uint48 public constant VETO_DURATION = 1 days;
+    uint48 public constant RESOLVER_SET_EPOCHS_DELAY = 1 days;
+    uint48 public constant SLASHING_WINDOW = 1 weeks;
+    uint48 public constant MIDDLEWARE_EPOCH_DURATION = 2 weeks;
+
     address owner;
     address alice;
     uint256 alicePrivateKey;
@@ -53,6 +58,9 @@ contract ZeroGravityBaseTest is Test {
     OptInService operatorNetworkOptInService;
     DefaultStakerRewardsFactory defaultStakerRewardsFactory;
 
+    uint64 operatorNetworkSpecificDelegatorType;
+    uint64 vetoSlasherType;
+
     Token collateral;
     VaultConfigurator vaultConfigurator;
 
@@ -62,34 +70,54 @@ contract ZeroGravityBaseTest is Test {
     address resolver;
     uint256 resolverPrivateKey;
 
-    function setUp() public {
+    UpgradeableBeacon operatorBeacon;
+    BaseMiddlewareReader middlewareReader; // the BaseMiddlewareReader contract
+    BaseMiddlewareReader reader; // the network contract but with reader interface
+
+    function _networkInitParams() internal view returns (IZeroGravityFactory.InitParams memory) {
+        return IZeroGravityFactory.InitParams({
+            vaultConfigurator: address(vaultConfigurator),
+            vaultVersion: 1,
+            delegatorVersion: operatorNetworkSpecificDelegatorType,
+            slasherVersion: vetoSlasherType,
+            epochDuration: VAULT_EPOCH_DURATION,
+            vetoDuration: VETO_DURATION,
+            resolverSetEpochsDelay: RESOLVER_SET_EPOCHS_DELAY,
+            operatorRegistry: address(operatorRegistry),
+            operatorBeacon: address(operatorBeacon),
+            resolver: resolver,
+            operatorVaultOptInService: address(operatorVaultOptInService),
+            operatorNetworkOptInService: address(operatorNetworkOptInService),
+            defaultStakerRewardsFactory: address(defaultStakerRewardsFactory)
+        });
+    }
+
+    function _middlewareInitParams() internal view returns (IZeroGravityMiddleware.InitParams memory) {
+        return IZeroGravityMiddleware.InitParams({
+            network: address(network),
+            slashingWindow: SLASHING_WINDOW,
+            vaultRegistry: address(vaultFactory),
+            operatorRegistry: address(operatorRegistry),
+            operatorNetOptin: address(operatorNetworkOptInService),
+            reader: address(middlewareReader),
+            defaultAdmin: address(network),
+            epochDuration: MIDDLEWARE_EPOCH_DURATION
+        });
+    }
+
+    function setUp() public virtual {
         _deploySymbiotic();
 
         // resolver
         (resolver, resolverPrivateKey) = makeAddrAndKey("resolver");
+        vm.deal(resolver, 1 ether);
 
         // operator beacon
         ZeroGravityOperator operatorImpl = new ZeroGravityOperator();
-        UpgradeableBeacon operatorBeacon = new UpgradeableBeacon(address(operatorImpl), owner);
+        operatorBeacon = new UpgradeableBeacon(address(operatorImpl), owner);
 
-        // factory
-        bytes memory params = abi.encode(
-            IZeroGravityFactory.InitParams({
-                vaultConfigurator: address(vaultConfigurator),
-                vaultVersion: 1,
-                delegatorVersion: 4, // operatorNetworkSpecificDelegatorImpl
-                slasherVersion: 2, // vetoSlasherImpl
-                epochDuration: 2 weeks,
-                vetoDuration: 1 days,
-                resolverSetEpochsDelay: 1 days,
-                operatorRegistry: address(operatorRegistry),
-                operatorBeacon: address(operatorBeacon),
-                resolver: resolver,
-                operatorVaultOptInService: address(operatorVaultOptInService),
-                operatorNetworkOptInService: address(operatorNetworkOptInService),
-                defaultStakerRewardsFactory: address(defaultStakerRewardsFactory)
-            })
-        );
+        // network
+        bytes memory params = abi.encode(_networkInitParams());
         ZeroGravityFactory factoryImpl = new ZeroGravityFactory();
         UpgradeableBeacon factoryBeacon = new UpgradeableBeacon(address(factoryImpl), owner);
         BeaconProxy factoryProxy =
@@ -97,20 +125,18 @@ contract ZeroGravityBaseTest is Test {
         network = ZeroGravityFactory(address(factoryProxy));
 
         // middleware
-        VaultRegistry vaultRegistry = new VaultRegistry();
-        BaseMiddlewareReader reader = new BaseMiddlewareReader();
-        params = abi.encode(
-            IZeroGravityMiddleware.InitParams({
-                network: address(network),
-                slashingWindow: 1 weeks,
-                vaultRegistry: address(vaultRegistry),
-                operatorRegistry: address(operatorRegistry),
-                operatorNetOptin: address(operatorNetworkOptInService),
-                reader: address(reader),
-                defaultAdmin: owner,
-                epochDuration: 1 hours
-            })
-        );
+        middlewareReader = new BaseMiddlewareReader();
+        params = abi.encode(_middlewareInitParams());
+        ZeroGravityMiddleware middlewareImpl = new ZeroGravityMiddleware();
+        UpgradeableBeacon middlewareBeacon = new UpgradeableBeacon(address(middlewareImpl), owner);
+        BeaconProxy middlewareProxy =
+            new BeaconProxy(address(middlewareBeacon), abi.encodeCall(ZeroGravityMiddleware.initialize, (params)));
+        middleware = ZeroGravityMiddleware(address(middlewareProxy));
+        reader = BaseMiddlewareReader(address(middlewareProxy));
+
+        network.registerNetwork(address(middleware), address(networkRegistry), address(networkMiddlewareService));
+
+        vm.warp(block.timestamp + 1);
     }
 
     function _deploySymbiotic() internal {
@@ -168,6 +194,7 @@ contract ZeroGravityBaseTest is Test {
         );
         delegatorFactory.whitelist(operatorSpecificDelegatorImpl);
 
+        operatorNetworkSpecificDelegatorType = delegatorFactory.totalTypes();
         address operatorNetworkSpecificDelegatorImpl = address(
             new OperatorNetworkSpecificDelegator(
                 address(operatorRegistry),
@@ -191,6 +218,7 @@ contract ZeroGravityBaseTest is Test {
         );
         slasherFactory.whitelist(slasherImpl);
 
+        vetoSlasherType = slasherFactory.totalTypes();
         address vetoSlasherImpl = address(
             new VetoSlasher(
                 address(vaultFactory),

@@ -64,9 +64,12 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
     bytes32 public constant UPDATE_COLLATERAL_ROLE = keccak256("UPDATE_COLLATERAL_ROLE");
     uint96 internal constant DEFAULT_SUBNETWORK = 0;
 
-    function initialize(bytes memory params) external initializer {
+    function initialize(
+        bytes memory params
+    ) external initializer {
         __AccessControl_init();
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(UPDATE_COLLATERAL_ROLE, msg.sender);
 
         InitParams memory p;
         p = abi.decode(params, (InitParams));
@@ -77,6 +80,8 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         $.delegatorVersion = p.delegatorVersion;
         $.slasherVersion = p.slasherVersion;
         $.epochDuration = p.epochDuration;
+        $.vetoDuration = p.vetoDuration;
+        $.resolverSetEpochsDelay = p.resolverSetEpochsDelay;
         $.operatorRegistry = p.operatorRegistry;
         $.operatorBeacon = p.operatorBeacon;
         $.resolver = p.resolver;
@@ -117,7 +122,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         } else {
             uint256 minDeposit = $.minValidatorDeposit.get(collateral);
             if (minDeposit == 0 || amount < minDeposit) {
-                revert InsufficientCollateral(amount, minDeposit);
+                revert InsufficientCollateral();
             }
             IERC20(collateral).safeTransferFrom(msg.sender, address(this), amount);
         }
@@ -198,6 +203,9 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
                 adminFeeSetRoleHolder: address(0)
             })
         );
+        // deposit on behalf of sender
+        IERC20(collateral).approve(vault, amount);
+        IVault(vault).deposit(msg.sender, amount);
 
         emit ValidatorCreated(pubkey, signature, collateral, vault, operator, rewards);
     }

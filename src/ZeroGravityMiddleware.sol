@@ -44,7 +44,9 @@ contract ZeroGravityMiddleware is
         }
     }
 
-    function initialize(bytes memory params) external initializer {
+    function initialize(
+        bytes memory params
+    ) external initializer {
         InitParams memory p;
         p = abi.decode(params, (InitParams));
 
