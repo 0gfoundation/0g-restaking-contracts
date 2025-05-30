@@ -22,6 +22,13 @@ interface IZeroGravityFactory {
         address defaultStakerRewardsFactory;
     }
 
+    struct ValidatorInfo {
+        address vault;
+        address operator;
+        address slasher;
+        address rewards;
+    }
+
     event ValidatorCreated(
         bytes pubkey, bytes signature, address collateral, address vault, address operator, address rewards
     );

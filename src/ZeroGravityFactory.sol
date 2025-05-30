@@ -49,6 +49,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         address defaultStakerRewardsFactory; // symbiotic default staker rewards factory
         EnumerableMap.AddressToUintMap minValidatorDeposit; // minimal amount to deposit when create validator
         mapping(bytes32 => bool) created; // create2 salt used
+        mapping(bytes32 => ValidatorInfo) validators; // keccak256(pubkey) => created validators
     }
 
     // keccak256(abi.encode(uint256(keccak256("0g.storage.ZeroGravityFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -107,6 +108,13 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
     ) external onlyRole(UPDATE_COLLATERAL_ROLE) {
         ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
         $.minValidatorDeposit.set(collateral, minValidatorDeposit);
+    }
+
+    function getValidator(
+        bytes memory pubkey
+    ) external view returns (ValidatorInfo memory) {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        return $.validators[keccak256(pubkey)];
     }
 
     function createValidator(
@@ -206,6 +214,9 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         // deposit on behalf of sender
         IERC20(collateral).approve(vault, amount);
         IVault(vault).deposit(msg.sender, amount);
+        // save validator
+        $.validators[keccak256(pubkey)] =
+            ValidatorInfo({vault: vault, operator: operator, slasher: slasher, rewards: rewards});
 
         emit ValidatorCreated(pubkey, signature, collateral, vault, operator, rewards);
     }
