@@ -12,18 +12,8 @@ import {ZeroGravityBaseTest} from "./ZeroGravityBase.t.sol";
 contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
     using Strings for uint256;
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
-    }
-
-    function _topUpCollateral(
-        address val
-    ) internal {
-        collateral.transfer(val, 32 * 1e18);
-        vm.deal(val, 1 ether);
-        vm.startPrank(val);
-        collateral.approve(address(network), type(uint256).max);
-        vm.stopPrank();
     }
 
     function test_CreateValidators() public {
@@ -31,7 +21,7 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         // update collateral config
         network.updateCollateralConfig(address(collateral), 32 * 1e18);
         // create validators
-        assertEq(middleware.getCaptureTimestamp(), middleware.getEpochStart(0));
+        assertEq(middleware.getCaptureTimestamp(), block.timestamp - 1);
         address[] memory vals = new address[](valCnt);
         address[] memory operators = new address[](valCnt);
         for (uint256 i = 0; i < valCnt; ++i) {
@@ -42,19 +32,21 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
             network.createValidator(abi.encode(i), "", address(collateral), 32 * 1e18);
             vm.stopPrank();
             operators[i] = middleware.operatorByKey(abi.encode(i));
-            assertTrue(reader.isOperatorRegistered(operators[i]), string.concat("operator not registered: #", i.toString()));
+            assertTrue(
+                reader.isOperatorRegistered(operators[i]), string.concat("operator not registered: #", i.toString())
+            );
             assertEq(reader.operatorVaultsLength(operators[i]), 1);
         }
-        vm.warp(block.timestamp + MIDDLEWARE_EPOCH_DURATION);
-        assertEq(middleware.getCaptureTimestamp(), middleware.getEpochStart(1));
+        vm.warp(block.timestamp + 2);
+        assertEq(middleware.getCaptureTimestamp(), block.timestamp - 1);
         // check states
         assertEq(reader.SLASHING_WINDOW(), _middlewareInitParams().slashingWindow);
         assertEq(reader.VAULT_REGISTRY(), _middlewareInitParams().vaultRegistry);
         assertEq(reader.OPERATOR_REGISTRY(), _middlewareInitParams().operatorRegistry);
         assertEq(reader.OPERATOR_NET_OPTIN(), _middlewareInitParams().operatorNetOptin);
         assertEq(reader.operatorsLength(), valCnt);
-        assertEq(reader.activeOperators(), operators);
-        assertEq(reader.activeOperatorsAt(uint48(block.timestamp - MIDDLEWARE_EPOCH_DURATION)), new address[](0));
+        assertEq(reader.activeOperators(), operators); // activeOperators() will use captureTimestamp(), which is block.timestamp - 1
+        assertEq(reader.activeOperatorsAt(uint48(block.timestamp - 2)), new address[](0));
         assertEq(reader.subnetworksLength(), 1);
         assertEq(reader.activeSubnetworks()[0], 0);
         assertEq(reader.sharedVaultsLength(), 0);
@@ -87,7 +79,7 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         network.createValidator(abi.encode(0), "", address(collateral), 16 * 1e18);
         vm.stopPrank();
     }
-    
+
     function test_CreateValidatorRevertOperatorCreated() public {
         network.updateCollateralConfig(address(collateral), 32 * 1e18);
         address val = makeAddr("validator#0");

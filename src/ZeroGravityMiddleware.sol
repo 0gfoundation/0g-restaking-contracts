@@ -11,7 +11,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {KeyManagerBytes} from "middleware-sdk/extensions/managers/keys/KeyManagerBytes.sol";
 import {OzAccessControl} from "middleware-sdk/extensions/managers/access/OzAccessControl.sol";
 import {Operators} from "middleware-sdk/extensions/operators/Operators.sol";
-import {EpochCapture} from "middleware-sdk/extensions/managers/capture-timestamps/EpochCapture.sol";
+import {TimestampCapture} from "middleware-sdk/extensions/managers/capture-timestamps/TimestampCapture.sol";
 import {SharedVaults} from "middleware-sdk/extensions/SharedVaults.sol";
 import {EqualStakePower} from "middleware-sdk/extensions/managers/stake-powers/EqualStakePower.sol";
 import {KeyManagerBytes} from "middleware-sdk/extensions/managers/keys/KeyManagerBytes.sol";
@@ -23,7 +23,7 @@ contract ZeroGravityMiddleware is
     SharedVaults,
     KeyManagerBytes,
     Operators,
-    EpochCapture,
+    TimestampCapture,
     OzAccessControl,
     EqualStakePower
 {
@@ -33,6 +33,9 @@ contract ZeroGravityMiddleware is
     struct ZeroGravityMiddlewareStorage {
         address resolver; // resolver for veto slashing
     }
+
+    bytes32 public constant SLASHER_ROLE = keccak256("SLASHER_ROLE");
+    bytes32 public constant REGISTER_OPERATOR_ROLE = keccak256("REGISTER_OPERATOR_ROLE");
 
     // keccak256(abi.encode(uint256(keccak256("0g.storage.ZeroGravityMiddleware")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ZeroGravityMiddlewareStorageLocation =
@@ -54,9 +57,10 @@ contract ZeroGravityMiddleware is
             p.network, p.slashingWindow, p.vaultRegistry, p.operatorRegistry, p.operatorNetOptin, p.reader
         );
         __OzAccessControl_init(p.defaultAdmin);
-        __EpochCapture_init(p.epochDuration);
 
-        _setSelectorRole(Operators.registerOperator.selector, DEFAULT_ADMIN_ROLE);
+        _setSelectorRole(Operators.registerOperator.selector, REGISTER_OPERATOR_ROLE);
+        _setSelectorRole(IZeroGravityMiddleware.slash.selector, SLASHER_ROLE);
+        _grantRole(REGISTER_OPERATOR_ROLE, p.network);
     }
 
     /* 
@@ -71,21 +75,20 @@ contract ZeroGravityMiddleware is
      * @param slashHints Hints for the slashing process.
      */
     function slash(
-        uint48 epoch,
-        bytes32 key,
+        uint48 captureTimestamp,
+        bytes memory key,
         uint256 amount,
         bytes[][] memory stakeHints,
         bytes[] memory slashHints
-    ) public checkAccess {
+    ) public override checkAccess {
         SlashParams memory params;
-        params.epochStart = getEpochStart(epoch);
-        params.operator = operatorByKey(abi.encode(key));
+        params.operator = operatorByKey(key);
 
-        _checkCanSlash(params.epochStart, key, params.operator);
+        _checkCanSlash(captureTimestamp, key, params.operator);
 
-        params.vaults = _activeVaultsAt(params.epochStart, params.operator);
-        params.subnetworks = _activeSubnetworksAt(params.epochStart);
-        params.totalPower = _getOperatorPowerAt(params.epochStart, params.operator, params.vaults, params.subnetworks);
+        params.vaults = _activeVaultsAt(captureTimestamp, params.operator);
+        params.subnetworks = _activeSubnetworksAt(captureTimestamp);
+        params.totalPower = _getOperatorPowerAt(captureTimestamp, params.operator, params.vaults, params.subnetworks);
         uint256 vaultsLength = params.vaults.length;
         uint256 subnetworksLength = params.subnetworks.length;
 
@@ -103,7 +106,7 @@ contract ZeroGravityMiddleware is
             for (uint256 j; j < subnetworksLength; ++j) {
                 bytes32 subnetwork = _NETWORK().subnetwork(uint96(params.subnetworks[j]));
                 uint256 stake = IBaseDelegator(IVault(vault).delegator()).stakeAt(
-                    subnetwork, params.operator, params.epochStart, stakeHints[i][j]
+                    subnetwork, params.operator, captureTimestamp, stakeHints[i][j]
                 );
 
                 uint256 slashAmount = Math.mulDiv(amount, stakeToPower(vault, stake), params.totalPower);
@@ -111,21 +114,21 @@ contract ZeroGravityMiddleware is
                     continue;
                 }
 
-                _slashVault(params.epochStart, vault, subnetwork, params.operator, slashAmount, slashHints[i]);
+                _slashVault(captureTimestamp, vault, subnetwork, params.operator, slashAmount, slashHints[i]);
             }
         }
     }
 
-    function executeSlash(address vault, uint256 slashIndex, bytes memory hints) external checkAccess {
+    function executeSlash(address vault, uint256 slashIndex, bytes memory hints) external {
         _executeSlash(vault, slashIndex, hints);
     }
 
-    function _checkCanSlash(uint48 epochStart, bytes32 key, address operator) internal view {
+    function _checkCanSlash(uint48 epochStart, bytes memory key, address operator) internal view {
         if (operator == address(0)) {
             revert NotExistKeySlash(); // Revert if the operator does not exist
         }
 
-        if (!keyWasActiveAt(epochStart, abi.encode(key))) {
+        if (!keyWasActiveAt(epochStart, key)) {
             revert InactiveKeySlash(); // Revert if the key is inactive
         }
 

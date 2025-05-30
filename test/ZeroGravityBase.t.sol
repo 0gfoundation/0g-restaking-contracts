@@ -40,7 +40,6 @@ contract ZeroGravityBaseTest is Test {
     uint48 public constant VETO_DURATION = 1 days;
     uint48 public constant RESOLVER_SET_EPOCHS_DELAY = 1 days;
     uint48 public constant SLASHING_WINDOW = 1 weeks;
-    uint48 public constant MIDDLEWARE_EPOCH_DURATION = 2 weeks;
 
     address owner;
     address alice;
@@ -74,6 +73,16 @@ contract ZeroGravityBaseTest is Test {
     BaseMiddlewareReader middlewareReader; // the BaseMiddlewareReader contract
     BaseMiddlewareReader reader; // the network contract but with reader interface
 
+    function _topUpCollateral(
+        address val
+    ) internal {
+        collateral.transfer(val, 32 * 1e18);
+        vm.deal(val, 1 ether);
+        vm.startPrank(val);
+        collateral.approve(address(network), type(uint256).max);
+        vm.stopPrank();
+    }
+
     function _networkInitParams() internal view returns (IZeroGravityFactory.InitParams memory) {
         return IZeroGravityFactory.InitParams({
             vaultConfigurator: address(vaultConfigurator),
@@ -100,12 +109,13 @@ contract ZeroGravityBaseTest is Test {
             operatorRegistry: address(operatorRegistry),
             operatorNetOptin: address(operatorNetworkOptInService),
             reader: address(middlewareReader),
-            defaultAdmin: address(network),
-            epochDuration: MIDDLEWARE_EPOCH_DURATION
+            defaultAdmin: address(this)
         });
     }
 
     function setUp() public virtual {
+        vm.warp(1 days * 365);
+
         _deploySymbiotic();
 
         // resolver
@@ -133,6 +143,7 @@ contract ZeroGravityBaseTest is Test {
             new BeaconProxy(address(middlewareBeacon), abi.encodeCall(ZeroGravityMiddleware.initialize, (params)));
         middleware = ZeroGravityMiddleware(address(middlewareProxy));
         reader = BaseMiddlewareReader(address(middlewareProxy));
+        middleware.grantRole(middleware.SLASHER_ROLE(), address(this));
 
         network.registerNetwork(address(middleware), address(networkRegistry), address(networkMiddlewareService));
 

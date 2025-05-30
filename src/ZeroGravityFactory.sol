@@ -156,7 +156,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
                 vaultParams: abi.encode(
                     IVault.InitParams({
                         collateral: address(collateral),
-                        burner: address(0),
+                        burner: address(0xdead),
                         epochDuration: $.epochDuration,
                         depositWhitelist: false,
                         isDepositLimit: false,
