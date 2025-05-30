@@ -31,4 +31,6 @@ interface IZeroGravityMiddleware {
         bytes[][] memory stakeHints,
         bytes[] memory slashHints
     ) external;
+
+    function distributeRewards(bytes memory pubkey, uint256 amount, bytes calldata data) external;
 }

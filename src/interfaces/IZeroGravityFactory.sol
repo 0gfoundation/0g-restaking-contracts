@@ -32,4 +32,15 @@ interface IZeroGravityFactory {
     event ValidatorCreated(
         bytes pubkey, bytes signature, address collateral, address vault, address operator, address rewards
     );
+
+    function getValidator(
+        bytes memory pubkey
+    ) external view returns (ValidatorInfo memory);
+
+    function createValidator(
+        bytes memory pubkey,
+        bytes memory signature,
+        address collateral,
+        uint256 amount
+    ) external;
 }

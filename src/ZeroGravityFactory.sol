@@ -112,7 +112,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
 
     function getValidator(
         bytes memory pubkey
-    ) external view returns (ValidatorInfo memory) {
+    ) external view override returns (ValidatorInfo memory) {
         ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
         return $.validators[keccak256(pubkey)];
     }
@@ -122,7 +122,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         bytes memory signature,
         address collateral,
         uint256 amount
-    ) external {
+    ) external override {
         ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
         // check collateral, transfer to contract
         if (!$.minValidatorDeposit.contains(collateral)) {
@@ -132,7 +132,9 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
             if (minDeposit == 0 || amount < minDeposit) {
                 revert InsufficientCollateral();
             }
+            uint256 balanceBefore = IERC20(collateral).balanceOf(address(this));
             IERC20(collateral).safeTransferFrom(msg.sender, address(this), amount);
+            amount = IERC20(collateral).balanceOf(address(this)) - balanceBefore;
         }
         // create operator contract, register in registry
         address operator;

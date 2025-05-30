@@ -7,6 +7,7 @@ import {IVetoSlasher} from "@symbiotic/interfaces/slasher/IVetoSlasher.sol";
 import {Subnetwork} from "@symbiotic/contracts/libraries/Subnetwork.sol";
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {KeyManagerBytes} from "middleware-sdk/extensions/managers/keys/KeyManagerBytes.sol";
 import {OzAccessControl} from "middleware-sdk/extensions/managers/access/OzAccessControl.sol";
@@ -16,7 +17,10 @@ import {SharedVaults} from "middleware-sdk/extensions/SharedVaults.sol";
 import {EqualStakePower} from "middleware-sdk/extensions/managers/stake-powers/EqualStakePower.sol";
 import {KeyManagerBytes} from "middleware-sdk/extensions/managers/keys/KeyManagerBytes.sol";
 
+import {IDefaultStakerRewards} from "rewards/src/interfaces/defaultStakerRewards/IDefaultStakerRewards.sol";
+
 import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddleware.sol";
+import {IZeroGravityFactory} from "./interfaces/IZeroGravityFactory.sol";
 
 contract ZeroGravityMiddleware is
     IZeroGravityMiddleware,
@@ -28,10 +32,11 @@ contract ZeroGravityMiddleware is
     EqualStakePower
 {
     using Subnetwork for address;
+    using SafeERC20 for IERC20;
 
     /// @custom:storage-location erc7201:0g.storage.ZeroGravityMiddleware
     struct ZeroGravityMiddlewareStorage {
-        address resolver; // resolver for veto slashing
+        address network; // network
     }
 
     bytes32 public constant SLASHER_ROLE = keccak256("SLASHER_ROLE");
@@ -61,6 +66,9 @@ contract ZeroGravityMiddleware is
         _setSelectorRole(Operators.registerOperator.selector, REGISTER_OPERATOR_ROLE);
         _setSelectorRole(IZeroGravityMiddleware.slash.selector, SLASHER_ROLE);
         _grantRole(REGISTER_OPERATOR_ROLE, p.network);
+
+        ZeroGravityMiddlewareStorage storage $ = _getZeroGravityMiddlewareStorage();
+        $.network = p.network;
     }
 
     /* 
@@ -135,5 +143,18 @@ contract ZeroGravityMiddleware is
         if (!_operatorWasActiveAt(epochStart, operator)) {
             revert InactiveOperatorSlash(); // Revert if the operator wasn't active
         }
+    }
+
+    function distributeRewards(bytes memory pubkey, uint256 amount, bytes calldata data) external override {
+        ZeroGravityMiddlewareStorage storage $ = _getZeroGravityMiddlewareStorage();
+        IZeroGravityFactory.ValidatorInfo memory info = IZeroGravityFactory($.network).getValidator(pubkey);
+        // transfer funds
+        IERC20 collateral = IERC20(IVault(info.vault).collateral());
+        uint256 balanceBefore = collateral.balanceOf(address(this));
+        collateral.safeTransferFrom(msg.sender, address(this), amount);
+        amount = collateral.balanceOf(address(this)) - balanceBefore;
+        IERC20(collateral).approve(info.rewards, amount);
+        // distribute
+        IDefaultStakerRewards(info.rewards).distributeRewards($.network, address(collateral), amount, data);
     }
 }
