@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 interface IZeroGravityMiddleware {
-    struct SlashParams {
+    struct OperatorParams {
         address operator;
         uint256 totalPower;
         address[] vaults;
@@ -23,6 +23,9 @@ interface IZeroGravityMiddleware {
     error InactiveOperatorSlash(); // Error thrown when trying to slash an inactive operator
     error NotExistKeySlash(); // Error thrown when the key does not exist for slashing
     error InvalidHints(); // Error thrown for invalid hints provided
+    error InvalidOperator();
+
+    function activeOperatorVaults(uint48 timestamp, address operator) external view returns (address[] memory);
 
     function slash(
         uint48 captureTimestamp,
@@ -32,5 +35,11 @@ interface IZeroGravityMiddleware {
         bytes[] memory slashHints
     ) external;
 
-    function distributeRewards(bytes memory pubkey, uint256 amount, bytes calldata data) external;
+    function distributeRewards(
+        bytes memory key,
+        uint48 captureTimestamp,
+        address token,
+        uint256 amount,
+        bytes[][] memory stakeHints
+    ) external;
 }

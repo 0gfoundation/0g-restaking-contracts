@@ -4,7 +4,9 @@ pragma solidity ^0.8.13;
 interface IZeroGravityFactory {
     error InvalidCollateral(); // Error thrown when get unregistered collateral
     error InsufficientCollateral(); // Error thrown when given amount is smaller than minimal deposit at validator creation
-    error OperatorCreated(); // Error thrown when try to create duplicate operators for the same pubkey
+    error VaultCreated(); // Error thrown when try to create duplicate vault for the same pubkey
+    error InvalidOperator(); // Error thrown when try to find invalid operator
+    error OperatorVaultNotFound(); // Error thrown when there is no corresponding vault of an operator
 
     struct InitParams {
         address vaultConfigurator;
@@ -22,24 +24,18 @@ interface IZeroGravityFactory {
         address defaultStakerRewardsFactory;
     }
 
-    struct ValidatorInfo {
-        address vault;
-        address operator;
-        address slasher;
-        address rewards;
-    }
-
     event ValidatorCreated(
         bytes pubkey, bytes signature, address collateral, address vault, address operator, address rewards
     );
 
-    function getValidator(
-        bytes memory pubkey
-    ) external view returns (ValidatorInfo memory);
+    function getRewarder(
+        address vault
+    ) external view returns (address);
 
     function createValidator(
         bytes memory pubkey,
         bytes memory signature,
+        address onBehalfOf,
         address collateral,
         uint256 amount
     ) external;

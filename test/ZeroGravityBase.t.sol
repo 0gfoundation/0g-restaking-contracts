@@ -60,7 +60,7 @@ contract ZeroGravityBaseTest is Test {
     uint64 operatorNetworkSpecificDelegatorType;
     uint64 vetoSlasherType;
 
-    Token collateral;
+    Token zgtoken;
     VaultConfigurator vaultConfigurator;
 
     ZeroGravityFactory network;
@@ -73,13 +73,13 @@ contract ZeroGravityBaseTest is Test {
     BaseMiddlewareReader middlewareReader; // the BaseMiddlewareReader contract
     BaseMiddlewareReader reader; // the network contract but with reader interface
 
-    function _topUpCollateral(
+    function _topUpTokens(
         address val
     ) internal {
-        collateral.transfer(val, 32 * 1e18);
+        zgtoken.transfer(val, 32 * 1e18);
         vm.deal(val, 1 ether);
         vm.startPrank(val);
-        collateral.approve(address(network), type(uint256).max);
+        zgtoken.approve(address(network), type(uint256).max);
         vm.stopPrank();
     }
 
@@ -144,6 +144,7 @@ contract ZeroGravityBaseTest is Test {
         middleware = ZeroGravityMiddleware(address(middlewareProxy));
         reader = BaseMiddlewareReader(address(middlewareProxy));
         middleware.grantRole(middleware.SLASHER_ROLE(), address(this));
+        middleware.grantRole(middleware.WEIGHT_SET_ROLE(), address(this));
 
         network.registerNetwork(address(middleware), address(networkRegistry), address(networkMiddlewareService));
 
@@ -241,7 +242,7 @@ contract ZeroGravityBaseTest is Test {
         );
         slasherFactory.whitelist(vetoSlasherImpl);
 
-        collateral = new Token("Token");
+        zgtoken = new Token("Token");
 
         vaultConfigurator =
             new VaultConfigurator(address(vaultFactory), address(delegatorFactory), address(slasherFactory));

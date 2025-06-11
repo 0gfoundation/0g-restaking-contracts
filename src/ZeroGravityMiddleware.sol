@@ -14,13 +14,13 @@ import {OzAccessControl} from "middleware-sdk/extensions/managers/access/OzAcces
 import {Operators} from "middleware-sdk/extensions/operators/Operators.sol";
 import {TimestampCapture} from "middleware-sdk/extensions/managers/capture-timestamps/TimestampCapture.sol";
 import {SharedVaults} from "middleware-sdk/extensions/SharedVaults.sol";
-import {EqualStakePower} from "middleware-sdk/extensions/managers/stake-powers/EqualStakePower.sol";
-import {KeyManagerBytes} from "middleware-sdk/extensions/managers/keys/KeyManagerBytes.sol";
 
 import {IDefaultStakerRewards} from "rewards/src/interfaces/defaultStakerRewards/IDefaultStakerRewards.sol";
 
 import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddleware.sol";
 import {IZeroGravityFactory} from "./interfaces/IZeroGravityFactory.sol";
+
+import {WeightedStakePower} from "./WeightedStakePower.sol";
 
 contract ZeroGravityMiddleware is
     IZeroGravityMiddleware,
@@ -29,7 +29,7 @@ contract ZeroGravityMiddleware is
     Operators,
     TimestampCapture,
     OzAccessControl,
-    EqualStakePower
+    WeightedStakePower
 {
     using Subnetwork for address;
     using SafeERC20 for IERC20;
@@ -41,6 +41,7 @@ contract ZeroGravityMiddleware is
 
     bytes32 public constant SLASHER_ROLE = keccak256("SLASHER_ROLE");
     bytes32 public constant REGISTER_OPERATOR_ROLE = keccak256("REGISTER_OPERATOR_ROLE");
+    bytes32 public constant WEIGHT_SET_ROLE = keccak256("WEIGHT_SET_ROLE");
 
     // keccak256(abi.encode(uint256(keccak256("0g.storage.ZeroGravityMiddleware")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ZeroGravityMiddlewareStorageLocation =
@@ -63,12 +64,40 @@ contract ZeroGravityMiddleware is
         );
         __OzAccessControl_init(p.defaultAdmin);
 
+        // setup roles
         _setSelectorRole(Operators.registerOperator.selector, REGISTER_OPERATOR_ROLE);
-        _setSelectorRole(IZeroGravityMiddleware.slash.selector, SLASHER_ROLE);
         _grantRole(REGISTER_OPERATOR_ROLE, p.network);
+        _setSelectorRole(IZeroGravityMiddleware.slash.selector, SLASHER_ROLE);
+        _setSelectorRole(WeightedStakePower.setCollateralWeight.selector, WEIGHT_SET_ROLE);
 
         ZeroGravityMiddlewareStorage storage $ = _getZeroGravityMiddlewareStorage();
         $.network = p.network;
+    }
+
+    function activeOperatorVaults(uint48 timestamp, address operator) public view override returns (address[] memory) {
+        return _activeVaultsAt(timestamp, operator);
+    }
+
+    function _registerOperatorImpl(address operator, bytes memory key, address vault) internal override {
+        if (!_isOperatorRegistered(operator)) {
+            _beforeRegisterOperator(operator, key, vault);
+            _registerOperator(operator);
+            _updateOperatorKeyImpl(operator, key);
+        }
+        if (vault != address(0)) {
+            _beforeRegisterOperatorVault(operator, vault);
+            _registerOperatorVault(operator, vault);
+        }
+    }
+
+    function _getOperatorParams(
+        uint48 captureTimestamp,
+        bytes memory key
+    ) internal view returns (OperatorParams memory params) {
+        params.operator = operatorByKey(key);
+        params.vaults = _activeVaultsAt(captureTimestamp, params.operator);
+        params.subnetworks = _activeSubnetworksAt(captureTimestamp);
+        params.totalPower = _getOperatorPowerAt(captureTimestamp, params.operator, params.vaults, params.subnetworks);
     }
 
     /* 
@@ -89,14 +118,10 @@ contract ZeroGravityMiddleware is
         bytes[][] memory stakeHints,
         bytes[] memory slashHints
     ) public override checkAccess {
-        SlashParams memory params;
-        params.operator = operatorByKey(key);
+        OperatorParams memory params = _getOperatorParams(captureTimestamp, key);
 
         _checkCanSlash(captureTimestamp, key, params.operator);
 
-        params.vaults = _activeVaultsAt(captureTimestamp, params.operator);
-        params.subnetworks = _activeSubnetworksAt(captureTimestamp);
-        params.totalPower = _getOperatorPowerAt(captureTimestamp, params.operator, params.vaults, params.subnetworks);
         uint256 vaultsLength = params.vaults.length;
         uint256 subnetworksLength = params.subnetworks.length;
 
@@ -145,16 +170,49 @@ contract ZeroGravityMiddleware is
         }
     }
 
-    function distributeRewards(bytes memory pubkey, uint256 amount, bytes calldata data) external override {
+    function distributeRewards(
+        bytes memory key,
+        uint48 captureTimestamp,
+        address token,
+        uint256 amount,
+        bytes[][] memory stakeHints
+    ) external override {
         ZeroGravityMiddlewareStorage storage $ = _getZeroGravityMiddlewareStorage();
-        IZeroGravityFactory.ValidatorInfo memory info = IZeroGravityFactory($.network).getValidator(pubkey);
-        // transfer funds
-        IERC20 collateral = IERC20(IVault(info.vault).collateral());
-        uint256 balanceBefore = collateral.balanceOf(address(this));
-        collateral.safeTransferFrom(msg.sender, address(this), amount);
-        amount = collateral.balanceOf(address(this)) - balanceBefore;
-        IERC20(collateral).approve(info.rewards, amount);
-        // distribute
-        IDefaultStakerRewards(info.rewards).distributeRewards($.network, address(collateral), amount, data);
+        // move token
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        amount = IERC20(token).balanceOf(address(this)) - balanceBefore;
+        // get operator vaults
+        OperatorParams memory params = _getOperatorParams(captureTimestamp, key);
+        if (params.operator == address(0)) {
+            revert InvalidOperator();
+        }
+        // distribute rewards
+        uint256 vaultsLength = params.vaults.length;
+        uint256 subnetworksLength = params.subnetworks.length;
+
+        for (uint256 i; i < vaultsLength; ++i) {
+            address vault = params.vaults[i];
+            for (uint256 j; j < subnetworksLength; ++j) {
+                bytes32 subnetwork = _NETWORK().subnetwork(uint96(params.subnetworks[j]));
+                uint256 stake = IBaseDelegator(IVault(vault).delegator()).stakeAt(
+                    subnetwork, params.operator, captureTimestamp, stakeHints[i][j]
+                );
+
+                uint256 rewardAmount = Math.mulDiv(amount, stakeToPower(vault, stake), params.totalPower);
+                if (rewardAmount == 0) {
+                    continue;
+                }
+
+                address rewarder = IZeroGravityFactory($.network).getRewarder(vault);
+                IERC20(token).approve(rewarder, rewardAmount);
+                IDefaultStakerRewards(rewarder).distributeRewards(
+                    $.network,
+                    token,
+                    rewardAmount,
+                    abi.encode(captureTimestamp, IDefaultStakerRewards(rewarder).adminFee(), "", "")
+                );
+            }
+        }
     }
 }

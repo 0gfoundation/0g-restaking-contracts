@@ -24,7 +24,11 @@ contract ZeroGravityOperator is IZeroGravityOperator, AccessControlUpgradeable {
         address operatorNetworkOptInService,
         address network
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        IOptInService(operatorVaultOptInService).optIn(vault);
-        IOptInService(operatorNetworkOptInService).optIn(network);
+        if (!IOptInService(operatorVaultOptInService).isOptedIn(address(this), vault)) {
+            IOptInService(operatorVaultOptInService).optIn(vault);
+        }
+        if (!IOptInService(operatorNetworkOptInService).isOptedIn(address(this), network)) {
+            IOptInService(operatorNetworkOptInService).optIn(network);
+        }
     }
 }

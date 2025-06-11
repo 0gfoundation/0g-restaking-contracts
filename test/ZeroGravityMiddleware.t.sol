@@ -19,24 +19,37 @@ contract ZeroGravityMiddlewareTest is ZeroGravityBaseTest {
         super.setUp();
     }
 
-    function _distributeRewards(bytes memory pubkey, uint256 amount, uint48 timestamp) internal {
-        middleware.distributeRewards(pubkey, amount, abi.encode(timestamp, 0, "", ""));
+    function _distributeRewards(bytes memory pubkey, address token, uint256 amount, uint48 timestamp) internal {
+        bytes[][] memory stakeHints = new bytes[][](1);
+        stakeHints[0] = new bytes[](1);
+        middleware.distributeRewards(pubkey, timestamp, token, amount, stakeHints);
     }
 
     function _claimable(IDefaultStakerRewards rewards, address user) internal view returns (uint256) {
-        return rewards.claimable(address(collateral), user, abi.encode(address(network), type(uint256).max));
+        return rewards.claimable(address(zgtoken), user, abi.encode(address(network), type(uint256).max));
+    }
+
+    function _getRewardContract(
+        bytes memory pubkey
+    ) internal view returns (IDefaultStakerRewards) {
+        address operator = middleware.operatorByKey(pubkey);
+        address[] memory vaults = middleware.activeOperatorVaults(uint48(block.timestamp), operator);
+        address rewarder = network.getRewarder(vaults[0]);
+        return IDefaultStakerRewards(rewarder);
     }
 
     function testSlash() public {
         // setup, create validator for alice & bob
-        network.updateCollateralConfig(address(collateral), 16 * 1e18);
+        network.updateCollateralConfig(address(zgtoken), 16 * 1e18);
+        middleware.setCollateralWeight(address(zgtoken), 1e18);
+
         address alice = makeAddr("alice");
         address bob = makeAddr("bob");
-        _topUpCollateral(alice);
-        _topUpCollateral(bob);
+        _topUpTokens(alice);
+        _topUpTokens(bob);
         // alice deposit 16
         vm.startPrank(alice);
-        network.createValidator("alice", "", address(collateral), 16 * 1e18);
+        network.createValidator("alice", "", alice, address(zgtoken), 16 * 1e18);
         vm.stopPrank();
         // activate operators
         vm.warp(block.timestamp + 2);
@@ -45,7 +58,7 @@ contract ZeroGravityMiddlewareTest is ZeroGravityBaseTest {
         // move to 10 seconds later, bob deposit 32
         vm.warp(block.timestamp + 10);
         vm.startPrank(bob);
-        collateral.approve(address(aliceVault), 32 * 1e18);
+        zgtoken.approve(address(aliceVault), 32 * 1e18);
         aliceVault.deposit(bob, 32 * 1e18);
         vm.stopPrank();
         assertEq(aliceVault.activeBalanceOf(alice), 16 * 1e18);
@@ -72,14 +85,16 @@ contract ZeroGravityMiddlewareTest is ZeroGravityBaseTest {
 
     function testDistributeRewards() public {
         // setup, create validator for alice & bob
-        network.updateCollateralConfig(address(collateral), 16 * 1e18);
+        network.updateCollateralConfig(address(zgtoken), 16 * 1e18);
+        middleware.setCollateralWeight(address(zgtoken), 1e18);
+
         address alice = makeAddr("alice");
         address bob = makeAddr("bob");
-        _topUpCollateral(alice);
-        _topUpCollateral(bob);
+        _topUpTokens(alice);
+        _topUpTokens(bob);
         // alice deposit 16
         vm.startPrank(alice);
-        network.createValidator("alice", "", address(collateral), 16 * 1e18);
+        network.createValidator("alice", "", address(alice), address(zgtoken), 16 * 1e18);
         vm.stopPrank();
         // activate operators
         vm.warp(block.timestamp + 2);
@@ -88,7 +103,7 @@ contract ZeroGravityMiddlewareTest is ZeroGravityBaseTest {
         // move to 10 seconds later, bob deposit 32
         vm.warp(block.timestamp + 10);
         vm.startPrank(bob);
-        collateral.approve(address(aliceVault), 32 * 1e18);
+        zgtoken.approve(address(aliceVault), 32 * 1e18);
         aliceVault.deposit(bob, 32 * 1e18);
         vm.stopPrank();
         assertEq(aliceVault.activeBalanceOf(alice), 16 * 1e18);
@@ -99,13 +114,13 @@ contract ZeroGravityMiddlewareTest is ZeroGravityBaseTest {
         assertEq(aliceVault.activeSharesOf(bob), 32 * 1e18);
         assertEq(aliceVault.activeShares(), 48 * 1e18);
         // distribute reward with timestamp 5 seconds ago
-        IDefaultStakerRewards rewards = IDefaultStakerRewards(network.getValidator("alice").rewards);
-        collateral.approve(address(middleware), type(uint).max);
-        _distributeRewards("alice", 10 * 1e18, uint48(block.timestamp - 5));
+        IDefaultStakerRewards rewards = _getRewardContract("alice");
+        zgtoken.approve(address(middleware), type(uint256).max);
+        _distributeRewards("alice", address(zgtoken), 10 * 1e18, uint48(block.timestamp - 5));
         assertEq(_claimable(rewards, alice), 10 * 1e18);
         assertEq(_claimable(rewards, bob), 0);
         vm.warp(block.timestamp + 5);
-        _distributeRewards("alice", 9 * 1e18, uint48(block.timestamp - 1));
+        _distributeRewards("alice", address(zgtoken), 9 * 1e18, uint48(block.timestamp - 1));
         assertEq(_claimable(rewards, alice), 13 * 1e18);
         assertEq(_claimable(rewards, bob), 6 * 1e18);
     }
