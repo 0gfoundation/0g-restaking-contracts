@@ -45,4 +45,10 @@ abstract contract WeightedStakePower is StakePowerManager, AccessManager {
         address collateral = IVault(vault).collateral();
         return stake * $.weights[collateral] / (10 ** IERC20Metadata(collateral).decimals());
     }
+
+    function powerToStake(address vault, uint256 power) public view returns (uint256) {
+        WeightedStakePowerStorage storage $ = _getWeightedStakePowerStorage();
+        address collateral = IVault(vault).collateral();
+        return power * (10 ** IERC20Metadata(collateral).decimals()) / $.weights[collateral];
+    }
 }

@@ -60,6 +60,38 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         }
         assertEq(zgtoken.balanceOf(address(network)), 0);
         assertEq(zgtoken.balanceOf(address(middleware)), 0);
+        // update collateral config for eth
+        network.updateCollateralConfig(address(eth), 1 * 1e18);
+        middleware.setCollateralWeight(address(eth), 10 * 1e18);
+        assertEq(middleware.getCaptureTimestamp(), block.timestamp - 1);
+        for (uint256 i = 0; i < valCnt; ++i) {
+            address val = vals[i];
+            vm.startPrank(val);
+            network.createValidator(abi.encode(i), "", val, address(eth), 1 * 1e18);
+            vm.stopPrank();
+            address operator = middleware.operatorByKey(abi.encode(i));
+            assertEq(operators[i], operator);
+            assertTrue(
+                reader.isOperatorRegistered(operators[i]), string.concat("operator not registered: #", i.toString())
+            );
+            assertEq(reader.operatorVaultsLength(operators[i]), 2);
+        }
+        vm.warp(block.timestamp + 2);
+        assertEq(middleware.getCaptureTimestamp(), block.timestamp - 1);
+        // check states
+        assertEq(reader.operatorsLength(), valCnt);
+        assertEq(reader.activeOperators(), operators); // activeOperators() will use captureTimestamp(), which is block.timestamp - 1
+        assertEq(reader.subnetworksLength(), 1);
+        assertEq(reader.activeSubnetworks()[0], 0);
+        assertEq(reader.sharedVaultsLength(), 0);
+        assertEq(reader.activeVaults().length, valCnt * 2);
+        for (uint256 i = 0; i < valCnt; ++i) {
+            address vault = reader.activeOperatorVaults(operators[i])[1];
+            assertEq(eth.balanceOf(vault), 1 * 1e18);
+            assertEq(reader.getOperatorPower(operators[i]), 32 * 1e18 + 10 * 1e18);
+        }
+        assertEq(eth.balanceOf(address(network)), 0);
+        assertEq(eth.balanceOf(address(middleware)), 0);
     }
 
     function test_CreateValidatorRevertInvalidCollateral() public {
@@ -81,7 +113,7 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         vm.stopPrank();
     }
 
-    function test_CreateValidatorRevertOperatorCreated() public {
+    function test_CreateValidatorRevertVaultCreated() public {
         network.updateCollateralConfig(address(zgtoken), 32 * 1e18);
         address val = makeAddr("validator#0");
         _topUpTokens(val);

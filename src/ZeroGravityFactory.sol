@@ -226,10 +226,10 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
             })
         );
         $.rewarder[vault] = rewards;
+        emit ValidatorCreated(pubkey, signature, collateral, vault, operator, rewards);
+
         // deposit on behalf of sender
         IERC20(collateral).approve(vault, amount);
         IVault(vault).deposit(onBehalfOf, amount);
-
-        emit ValidatorCreated(pubkey, signature, collateral, vault, operator, rewards);
     }
 }

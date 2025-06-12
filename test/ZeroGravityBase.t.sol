@@ -61,6 +61,7 @@ contract ZeroGravityBaseTest is Test {
     uint64 vetoSlasherType;
 
     Token zgtoken;
+    Token eth;
     VaultConfigurator vaultConfigurator;
 
     ZeroGravityFactory network;
@@ -76,10 +77,12 @@ contract ZeroGravityBaseTest is Test {
     function _topUpTokens(
         address val
     ) internal {
+        eth.transfer(val, 32 * 1e18);
         zgtoken.transfer(val, 32 * 1e18);
         vm.deal(val, 1 ether);
         vm.startPrank(val);
         zgtoken.approve(address(network), type(uint256).max);
+        eth.approve(address(network), type(uint256).max);
         vm.stopPrank();
     }
 
@@ -149,6 +152,15 @@ contract ZeroGravityBaseTest is Test {
         network.registerNetwork(address(middleware), address(networkRegistry), address(networkMiddlewareService));
 
         vm.warp(block.timestamp + 1);
+    }
+
+    function _stakeHints(bytes memory pubkey, uint48 timestamp) internal view returns (bytes[][] memory stakeHints) {
+        address operator = middleware.operatorByKey(pubkey);
+        uint256 len = reader.activeOperatorVaultsAt(timestamp, operator).length;
+        stakeHints = new bytes[][](len);
+        for (uint256 i = 0; i < len; ++i) {
+            stakeHints[i] = new bytes[](1);
+        }
     }
 
     function _deploySymbiotic() internal {
@@ -242,7 +254,8 @@ contract ZeroGravityBaseTest is Test {
         );
         slasherFactory.whitelist(vetoSlasherImpl);
 
-        zgtoken = new Token("Token");
+        zgtoken = new Token("ZG");
+        eth = new Token("ETH");
 
         vaultConfigurator =
             new VaultConfigurator(address(vaultFactory), address(delegatorFactory), address(slasherFactory));

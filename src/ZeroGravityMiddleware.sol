@@ -74,10 +74,6 @@ contract ZeroGravityMiddleware is
         $.network = p.network;
     }
 
-    function activeOperatorVaults(uint48 timestamp, address operator) public view override returns (address[] memory) {
-        return _activeVaultsAt(timestamp, operator);
-    }
-
     function _registerOperatorImpl(address operator, bytes memory key, address vault) internal override {
         if (!_isOperatorRegistered(operator)) {
             _beforeRegisterOperator(operator, key, vault);
@@ -114,7 +110,7 @@ contract ZeroGravityMiddleware is
     function slash(
         uint48 captureTimestamp,
         bytes memory key,
-        uint256 amount,
+        uint256 power,
         bytes[][] memory stakeHints,
         bytes[] memory slashHints
     ) public override checkAccess {
@@ -142,7 +138,8 @@ contract ZeroGravityMiddleware is
                     subnetwork, params.operator, captureTimestamp, stakeHints[i][j]
                 );
 
-                uint256 slashAmount = Math.mulDiv(amount, stakeToPower(vault, stake), params.totalPower);
+                uint256 slashAmount =
+                    powerToStake(vault, Math.mulDiv(power, stakeToPower(vault, stake), params.totalPower));
                 if (slashAmount == 0) {
                     continue;
                 }
@@ -152,8 +149,10 @@ contract ZeroGravityMiddleware is
         }
     }
 
-    function executeSlash(address vault, uint256 slashIndex, bytes memory hints) external {
-        _executeSlash(vault, slashIndex, hints);
+    function executeSlashs(address[] memory vaults, uint256[] memory slashIndexes, bytes[] memory hints) external {
+        for (uint256 i = 0; i < vaults.length; ++i) {
+            _executeSlash(vaults[i], slashIndexes[i], hints[i]);
+        }
     }
 
     function _checkCanSlash(uint48 epochStart, bytes memory key, address operator) internal view {

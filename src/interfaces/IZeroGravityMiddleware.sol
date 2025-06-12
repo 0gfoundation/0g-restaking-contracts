@@ -25,8 +25,6 @@ interface IZeroGravityMiddleware {
     error InvalidHints(); // Error thrown for invalid hints provided
     error InvalidOperator();
 
-    function activeOperatorVaults(uint48 timestamp, address operator) external view returns (address[] memory);
-
     function slash(
         uint48 captureTimestamp,
         bytes memory key,
