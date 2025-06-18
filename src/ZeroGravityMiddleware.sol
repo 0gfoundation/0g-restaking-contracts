@@ -112,7 +112,8 @@ contract ZeroGravityMiddleware is
         bytes memory key,
         uint256 power,
         bytes[][] memory stakeHints,
-        bytes[] memory slashHints
+        bytes[] memory slashHints,
+        bytes[] memory weightHints
     ) public override checkAccess {
         OperatorParams memory params = _getOperatorParams(captureTimestamp, key);
 
@@ -122,7 +123,10 @@ contract ZeroGravityMiddleware is
         uint256 subnetworksLength = params.subnetworks.length;
 
         // Validate hints lengths upfront
-        if (stakeHints.length != slashHints.length || stakeHints.length != vaultsLength) {
+        if (
+            stakeHints.length != slashHints.length || stakeHints.length != vaultsLength
+                || weightHints.length != slashHints.length
+        ) {
             revert InvalidHints();
         }
 
@@ -137,9 +141,11 @@ contract ZeroGravityMiddleware is
                 uint256 stake = IBaseDelegator(IVault(vault).delegator()).stakeAt(
                     subnetwork, params.operator, captureTimestamp, stakeHints[i][j]
                 );
-
+                address collateral = IVault(vault).collateral();
+                uint256 weight = _getCollateralWeight(collateral, captureTimestamp, weightHints[i]);
+                uint256 vaultPower = _stakeToPower(stake, weight, collateral);
                 uint256 slashAmount =
-                    powerToStake(vault, Math.mulDiv(power, stakeToPower(vault, stake), params.totalPower));
+                    _powerToStake(Math.mulDiv(power, vaultPower, params.totalPower), weight, collateral);
                 if (slashAmount == 0) {
                     continue;
                 }
@@ -169,6 +175,7 @@ contract ZeroGravityMiddleware is
         }
     }
 
+    /*
     function distributeRewards(
         bytes memory key,
         uint48 captureTimestamp,
@@ -214,4 +221,5 @@ contract ZeroGravityMiddleware is
             }
         }
     }
+    */
 }

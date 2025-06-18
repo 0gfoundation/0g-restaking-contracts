@@ -30,9 +30,11 @@ interface IZeroGravityMiddleware {
         bytes memory key,
         uint256 amount,
         bytes[][] memory stakeHints,
-        bytes[] memory slashHints
+        bytes[] memory slashHints,
+        bytes[] memory weightHints
     ) external;
 
+    /*
     function distributeRewards(
         bytes memory key,
         uint48 captureTimestamp,
@@ -40,4 +42,5 @@ interface IZeroGravityMiddleware {
         uint256 amount,
         bytes[][] memory stakeHints
     ) external;
+    */
 }
