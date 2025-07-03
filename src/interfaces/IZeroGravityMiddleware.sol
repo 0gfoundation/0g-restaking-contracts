@@ -33,14 +33,4 @@ interface IZeroGravityMiddleware {
         bytes[] memory slashHints,
         bytes[] memory weightHints
     ) external;
-
-    /*
-    function distributeRewards(
-        bytes memory key,
-        uint48 captureTimestamp,
-        address token,
-        uint256 amount,
-        bytes[][] memory stakeHints
-    ) external;
-    */
 }

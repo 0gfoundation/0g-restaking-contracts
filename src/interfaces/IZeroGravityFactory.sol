@@ -21,19 +21,15 @@ interface IZeroGravityFactory {
         address resolver;
         address operatorVaultOptInService;
         address operatorNetworkOptInService;
-        address defaultStakerRewardsFactory;
     }
 
     event ValidatorCreated(
-        bytes pubkey, bytes signature, address collateral, address vault, address operator, address rewards
+        bytes pubkey, bytes credentials, bytes signature, address collateral, address vault, address operator
     );
-
-    function getRewarder(
-        address vault
-    ) external view returns (address);
 
     function createValidator(
         bytes memory pubkey,
+        bytes memory credentials,
         bytes memory signature,
         address onBehalfOf,
         address collateral,

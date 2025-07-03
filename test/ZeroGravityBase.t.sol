@@ -22,9 +22,6 @@ import {OperatorNetworkSpecificDelegator} from "@symbiotic/contracts/delegator/O
 import {Slasher} from "@symbiotic/contracts/slasher/Slasher.sol";
 import {VetoSlasher} from "@symbiotic/contracts/slasher/VetoSlasher.sol";
 
-import {DefaultStakerRewardsFactory} from "rewards/src/contracts/defaultStakerRewards/DefaultStakerRewardsFactory.sol";
-import {DefaultStakerRewards} from "rewards/src/contracts/defaultStakerRewards/DefaultStakerRewards.sol";
-
 import {BaseMiddlewareReader} from "middleware-sdk/middleware/BaseMiddlewareReader.sol";
 
 import {Token} from "./mocks/Token.sol";
@@ -55,7 +52,6 @@ contract ZeroGravityBaseTest is Test {
     NetworkMiddlewareService networkMiddlewareService;
     OptInService operatorVaultOptInService;
     OptInService operatorNetworkOptInService;
-    DefaultStakerRewardsFactory defaultStakerRewardsFactory;
 
     uint64 operatorNetworkSpecificDelegatorType;
     uint64 vetoSlasherType;
@@ -99,8 +95,7 @@ contract ZeroGravityBaseTest is Test {
             operatorBeacon: address(operatorBeacon),
             resolver: resolver,
             operatorVaultOptInService: address(operatorVaultOptInService),
-            operatorNetworkOptInService: address(operatorNetworkOptInService),
-            defaultStakerRewardsFactory: address(defaultStakerRewardsFactory)
+            operatorNetworkOptInService: address(operatorNetworkOptInService)
         });
     }
 
@@ -259,10 +254,5 @@ contract ZeroGravityBaseTest is Test {
 
         vaultConfigurator =
             new VaultConfigurator(address(vaultFactory), address(delegatorFactory), address(slasherFactory));
-
-        address defaultStakerRewards_ =
-            address(new DefaultStakerRewards(address(vaultFactory), address(networkMiddlewareService)));
-
-        defaultStakerRewardsFactory = new DefaultStakerRewardsFactory(defaultStakerRewards_);
     }
 }

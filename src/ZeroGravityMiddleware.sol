@@ -15,8 +15,6 @@ import {Operators} from "middleware-sdk/extensions/operators/Operators.sol";
 import {TimestampCapture} from "middleware-sdk/extensions/managers/capture-timestamps/TimestampCapture.sol";
 import {SharedVaults} from "middleware-sdk/extensions/SharedVaults.sol";
 
-import {IDefaultStakerRewards} from "rewards/src/interfaces/defaultStakerRewards/IDefaultStakerRewards.sol";
-
 import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddleware.sol";
 import {IZeroGravityFactory} from "./interfaces/IZeroGravityFactory.sol";
 
@@ -174,52 +172,4 @@ contract ZeroGravityMiddleware is
             revert InactiveOperatorSlash(); // Revert if the operator wasn't active
         }
     }
-
-    /*
-    function distributeRewards(
-        bytes memory key,
-        uint48 captureTimestamp,
-        address token,
-        uint256 amount,
-        bytes[][] memory stakeHints
-    ) external override {
-        ZeroGravityMiddlewareStorage storage $ = _getZeroGravityMiddlewareStorage();
-        // move token
-        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        amount = IERC20(token).balanceOf(address(this)) - balanceBefore;
-        // get operator vaults
-        OperatorParams memory params = _getOperatorParams(captureTimestamp, key);
-        if (params.operator == address(0)) {
-            revert InvalidOperator();
-        }
-        // distribute rewards
-        uint256 vaultsLength = params.vaults.length;
-        uint256 subnetworksLength = params.subnetworks.length;
-
-        for (uint256 i; i < vaultsLength; ++i) {
-            address vault = params.vaults[i];
-            for (uint256 j; j < subnetworksLength; ++j) {
-                bytes32 subnetwork = _NETWORK().subnetwork(uint96(params.subnetworks[j]));
-                uint256 stake = IBaseDelegator(IVault(vault).delegator()).stakeAt(
-                    subnetwork, params.operator, captureTimestamp, stakeHints[i][j]
-                );
-
-                uint256 rewardAmount = Math.mulDiv(amount, stakeToPower(vault, stake), params.totalPower);
-                if (rewardAmount == 0) {
-                    continue;
-                }
-
-                address rewarder = IZeroGravityFactory($.network).getRewarder(vault);
-                IERC20(token).approve(rewarder, rewardAmount);
-                IDefaultStakerRewards(rewarder).distributeRewards(
-                    $.network,
-                    token,
-                    rewardAmount,
-                    abi.encode(captureTimestamp, IDefaultStakerRewards(rewarder).adminFee(), "", "")
-                );
-            }
-        }
-    }
-    */
 }

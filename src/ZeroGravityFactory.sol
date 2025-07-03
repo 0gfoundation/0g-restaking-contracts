@@ -20,10 +20,6 @@ import {INetworkMiddlewareService} from "@symbiotic/interfaces/service/INetworkM
 import {IOperators} from "middleware-sdk/interfaces/extensions/operators/IOperators.sol";
 import {IBaseMiddlewareReader} from "middleware-sdk/interfaces/IBaseMiddlewareReader.sol";
 
-import {IDefaultStakerRewardsFactory} from
-    "rewards/src/interfaces/defaultStakerRewards/IDefaultStakerRewardsFactory.sol";
-import {IDefaultStakerRewards} from "rewards/src/interfaces/defaultStakerRewards/IDefaultStakerRewards.sol";
-
 import {IZeroGravityFactory} from "./interfaces/IZeroGravityFactory.sol";
 import {IZeroGravityOperator} from "./interfaces/IZeroGravityOperator.sol";
 import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddleware.sol";
@@ -48,11 +44,9 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         address resolver; // veto slash resolver
         address operatorVaultOptInService; // symbiotic operator -> vault opt in service
         address operatorNetworkOptInService; // symbiotic operator -> network opt in service
-        address defaultStakerRewardsFactory; // symbiotic default staker rewards factory
         EnumerableMap.AddressToUintMap minValidatorDeposit; // minimal amount to deposit when create validator
         mapping(bytes32 => address) operators; // create2 salt => operator address
         mapping(address => mapping(address => bool)) createdVaults; // operator => collateral => created
-        mapping(address => address) rewarder; // vault => rewards
     }
 
     // keccak256(abi.encode(uint256(keccak256("0g.storage.ZeroGravityFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -91,7 +85,6 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         $.resolver = p.resolver;
         $.operatorVaultOptInService = p.operatorVaultOptInService;
         $.operatorNetworkOptInService = p.operatorNetworkOptInService;
-        $.defaultStakerRewardsFactory = p.defaultStakerRewardsFactory;
     }
 
     function registerNetwork(
@@ -113,13 +106,6 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         $.minValidatorDeposit.set(collateral, minValidatorDeposit);
     }
 
-    function getRewarder(
-        address vault
-    ) public view override returns (address) {
-        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
-        return $.rewarder[vault];
-    }
-
     function _createOperatorIfNotExists(
         bytes memory pubkey
     ) internal returns (address operator) {
@@ -138,6 +124,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
 
     function createValidator(
         bytes memory pubkey,
+        bytes memory credentials,
         bytes memory signature,
         address onBehalfOf,
         address collateral,
@@ -215,18 +202,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         );
         // register operator and vault to middleware
         IOperators($.middleware).registerOperator(operator, pubkey, vault);
-        // staker rewards
-        address rewards = IDefaultStakerRewardsFactory($.defaultStakerRewardsFactory).create(
-            IDefaultStakerRewards.InitParams({
-                vault: vault,
-                adminFee: 0,
-                defaultAdminRoleHolder: address(this),
-                adminFeeClaimRoleHolder: address(0),
-                adminFeeSetRoleHolder: address(0)
-            })
-        );
-        $.rewarder[vault] = rewards;
-        emit ValidatorCreated(pubkey, signature, collateral, vault, operator, rewards);
+        emit ValidatorCreated(pubkey, credentials, signature, collateral, vault, operator);
 
         // deposit on behalf of sender
         IERC20(collateral).approve(vault, amount);

@@ -30,7 +30,7 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
             vals[i] = val;
             _topUpTokens(val);
             vm.startPrank(val);
-            network.createValidator(abi.encode(i), "", val, address(zgtoken), 32 * 1e18);
+            network.createValidator(abi.encode(i), "", "", val, address(zgtoken), 32 * 1e18);
             vm.stopPrank();
             operators[i] = middleware.operatorByKey(abi.encode(i));
             assertTrue(
@@ -67,7 +67,7 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         for (uint256 i = 0; i < valCnt; ++i) {
             address val = vals[i];
             vm.startPrank(val);
-            network.createValidator(abi.encode(i), "", val, address(eth), 1 * 1e18);
+            network.createValidator(abi.encode(i), "", "", val, address(eth), 1 * 1e18);
             vm.stopPrank();
             address operator = middleware.operatorByKey(abi.encode(i));
             assertEq(operators[i], operator);
@@ -99,7 +99,7 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         _topUpTokens(val);
         vm.expectRevert(IZeroGravityFactory.InvalidCollateral.selector);
         vm.startPrank(val);
-        network.createValidator(abi.encode(0), "", address(val), address(zgtoken), 32 * 1e18);
+        network.createValidator(abi.encode(0), "", "", address(val), address(zgtoken), 32 * 1e18);
         vm.stopPrank();
     }
 
@@ -109,7 +109,7 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         _topUpTokens(val);
         vm.expectRevert(IZeroGravityFactory.InsufficientCollateral.selector);
         vm.startPrank(val);
-        network.createValidator(abi.encode(0), "", address(val), address(zgtoken), 16 * 1e18);
+        network.createValidator(abi.encode(0), "", "", address(val), address(zgtoken), 16 * 1e18);
         vm.stopPrank();
     }
 
@@ -118,14 +118,14 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         address val = makeAddr("validator#0");
         _topUpTokens(val);
         vm.startPrank(val);
-        network.createValidator(abi.encode(0), "", address(val), address(zgtoken), 32 * 1e18);
+        network.createValidator(abi.encode(0), "", "", address(val), address(zgtoken), 32 * 1e18);
         vm.stopPrank();
 
         val = makeAddr("validator#1");
         _topUpTokens(val);
         vm.expectRevert(IZeroGravityFactory.VaultCreated.selector);
         vm.startPrank(val);
-        network.createValidator(abi.encode(0), "", address(val), address(zgtoken), 32 * 1e18);
+        network.createValidator(abi.encode(0), "", "", address(val), address(zgtoken), 32 * 1e18);
         vm.stopPrank();
     }
 }
