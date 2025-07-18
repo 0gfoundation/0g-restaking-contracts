@@ -28,7 +28,7 @@ import {Token} from "../../test/mocks/Token.sol";
 import {JsonUtils} from "./Utils.s.sol";
 
 contract CoreScript is Script, JsonUtils {
-    function run() public {
+    function run() public virtual {
         uint256 privKey = vm.envUint("PRIVATE_KEY");
         address owner = vm.addr(privKey);
 

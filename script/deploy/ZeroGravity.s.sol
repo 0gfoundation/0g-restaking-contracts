@@ -33,13 +33,13 @@ import {ZeroGravityOperator} from "../../src/ZeroGravityOperator.sol";
 import {Token} from "../../test/mocks/Token.sol";
 import {JsonUtils} from "./Utils.s.sol";
 
-contract CoreScript is Script, JsonUtils {
+contract ZeroGravityScript is Script, JsonUtils {
     uint48 public constant VAULT_EPOCH_DURATION = 2 weeks;
     uint48 public constant VETO_DURATION = 1 days;
     uint48 public constant RESOLVER_SET_EPOCHS_DELAY = 1 days;
     uint48 public constant SLASHING_WINDOW = 1 weeks;
 
-    function run() public {
+    function run() public virtual {
         uint256 privKey = vm.envUint("PRIVATE_KEY");
         address owner = vm.addr(privKey);
 
@@ -72,7 +72,9 @@ contract CoreScript is Script, JsonUtils {
             operatorBeacon: address(operatorBeacon),
             resolver: resolver,
             operatorVaultOptInService: vm.parseJsonAddress(json, ".OperatorVaultOptInService"),
-            operatorNetworkOptInService: vm.parseJsonAddress(json, ".OperatorNetworkOptInService")
+            operatorNetworkOptInService: vm.parseJsonAddress(json, ".OperatorNetworkOptInService"),
+            rewarderFactory: address(0),
+            rewarderInitCodeHash: bytes32(0)
         });
 
         // network

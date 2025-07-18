@@ -24,6 +24,9 @@ import {IZeroGravityFactory} from "./interfaces/IZeroGravityFactory.sol";
 import {IZeroGravityOperator} from "./interfaces/IZeroGravityOperator.sol";
 import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddleware.sol";
 
+import {Create2Helper} from "./libraries/Create2Helper.sol";
+import {Constants} from "./libraries/Constants.sol";
+
 contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
     using EnumerableMap for EnumerableMap.AddressToUintMap;
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -44,6 +47,8 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         address resolver; // veto slash resolver
         address operatorVaultOptInService; // symbiotic operator -> vault opt in service
         address operatorNetworkOptInService; // symbiotic operator -> network opt in service
+        address rewarderFactory; // address of rewarder factory
+        bytes32 rewarderInitCodeHash; // init code hash for rewarder in rewarder factory
         EnumerableMap.AddressToUintMap minValidatorDeposit; // minimal amount to deposit when create validator
         mapping(bytes32 => address) operators; // create2 salt => operator address
         mapping(address => mapping(address => bool)) createdVaults; // operator => collateral => created
@@ -61,6 +66,15 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
 
     bytes32 public constant UPDATE_COLLATERAL_ROLE = keccak256("UPDATE_COLLATERAL_ROLE");
     uint96 internal constant DEFAULT_SUBNETWORK = 0;
+
+    /// @dev The length of the public key, PUBLIC_KEY_LENGTH bytes.
+    uint8 internal constant PUBLIC_KEY_LENGTH = 48;
+
+    /// @dev The length of the signature, SIGNATURE_LENGTH bytes.
+    uint8 internal constant SIGNATURE_LENGTH = 96;
+
+    /// @dev The length of the credentials, 1 byte prefix + 11 bytes padding + 20 bytes address = 32 bytes.
+    uint8 internal constant CREDENTIALS_LENGTH = 32;
 
     function initialize(
         bytes memory params
@@ -85,6 +99,14 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         $.resolver = p.resolver;
         $.operatorVaultOptInService = p.operatorVaultOptInService;
         $.operatorNetworkOptInService = p.operatorNetworkOptInService;
+        $.rewarderFactory = p.rewarderFactory;
+        $.rewarderInitCodeHash = p.rewarderInitCodeHash;
+    }
+
+    function _rewarderSalt(
+        bytes memory pubkey
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(Constants.SYMBIOTIC_DOMAIN, pubkey));
     }
 
     function registerNetwork(
@@ -130,6 +152,18 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         address collateral,
         uint256 amount
     ) external override {
+        if (pubkey.length != PUBLIC_KEY_LENGTH) {
+            revert InvalidPubKeyLength();
+        }
+
+        if (credentials.length != CREDENTIALS_LENGTH) {
+            revert InvalidCredentialsLength();
+        }
+
+        if (signature.length != SIGNATURE_LENGTH) {
+            revert InvalidSignatureLength();
+        }
+
         ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
         // check collateral, transfer to contract
         if (!$.minValidatorDeposit.contains(collateral)) {
@@ -202,7 +236,10 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         );
         // register operator and vault to middleware
         IOperators($.middleware).registerOperator(operator, pubkey, vault);
-        emit ValidatorCreated(pubkey, credentials, signature, collateral, vault, operator);
+        // calculate rewarder
+        address rewarder =
+            Create2Helper.computeCreate2Address($.rewarderFactory, _rewarderSalt(pubkey), $.rewarderInitCodeHash);
+        emit ValidatorCreated(pubkey, credentials, signature, collateral, rewarder, vault, operator);
 
         // deposit on behalf of sender
         IERC20(collateral).approve(vault, amount);

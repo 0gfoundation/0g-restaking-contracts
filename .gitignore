@@ -19,3 +19,9 @@ docs/
 # abi gen
 abis/
 abigen/
+
+# dev scripts
+run.sh
+deposit.sh
+register.sh
+withdraw.sh

@@ -95,7 +95,9 @@ contract ZeroGravityBaseTest is Test {
             operatorBeacon: address(operatorBeacon),
             resolver: resolver,
             operatorVaultOptInService: address(operatorVaultOptInService),
-            operatorNetworkOptInService: address(operatorNetworkOptInService)
+            operatorNetworkOptInService: address(operatorNetworkOptInService),
+            rewarderFactory: address(0),
+            rewarderInitCodeHash: bytes32(0)
         });
     }
 

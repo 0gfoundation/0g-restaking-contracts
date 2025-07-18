@@ -30,13 +30,14 @@ contract ZeroGravityMiddlewareTest is ZeroGravityBaseTest {
         _topUpTokens(bob);
         // alice deposit 16
         vm.startPrank(alice);
-        network.createValidator("alice", "", "", alice, address(zgtoken), 16 * 1e18);
-        network.createValidator("alice", "", "", alice, address(eth), 16 * 1e17);
+        bytes memory aliceKey = new bytes(48);
+        network.createValidator(aliceKey, new bytes(32), new bytes(96), alice, address(zgtoken), 16 * 1e18);
+        network.createValidator(aliceKey, new bytes(32), new bytes(96), alice, address(eth), 16 * 1e17);
         vm.stopPrank();
         // activate operators
         vm.warp(block.timestamp + 2);
-        IVault zgVault = IVault(reader.activeOperatorVaults(middleware.operatorByKey("alice"))[0]);
-        IVault ethVault = IVault(reader.activeOperatorVaults(middleware.operatorByKey("alice"))[1]);
+        IVault zgVault = IVault(reader.activeOperatorVaults(middleware.operatorByKey(aliceKey))[0]);
+        IVault ethVault = IVault(reader.activeOperatorVaults(middleware.operatorByKey(aliceKey))[1]);
         assertEq(zgVault.currentEpoch(), 0);
         // move to 10 seconds later, bob deposit 32
         vm.warp(block.timestamp + 10);
@@ -61,10 +62,10 @@ contract ZeroGravityMiddlewareTest is ZeroGravityBaseTest {
         assertEq(ethVault.activeSharesOf(bob), 32 * 1e17);
         assertEq(ethVault.activeShares(), 48 * 1e17);
         // request and execute slash, with slash timestamp 5 seconds ago
-        bytes[][] memory stakeHints = _stakeHints("alice", uint48(block.timestamp));
+        bytes[][] memory stakeHints = _stakeHints(aliceKey, uint48(block.timestamp));
         bytes[] memory slashHints = new bytes[](2);
         bytes[] memory weightHints = new bytes[](2);
-        middleware.slash(uint48(block.timestamp - 5), "alice", 18 * 1e18, stakeHints, slashHints, weightHints);
+        middleware.slash(uint48(block.timestamp - 5), aliceKey, 18 * 1e18, stakeHints, slashHints, weightHints);
         vm.warp(block.timestamp + VETO_DURATION + 1);
         // slash
         uint256[] memory indexes = new uint256[](2);

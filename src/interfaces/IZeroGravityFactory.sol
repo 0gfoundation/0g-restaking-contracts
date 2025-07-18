@@ -7,6 +7,9 @@ interface IZeroGravityFactory {
     error VaultCreated(); // Error thrown when try to create duplicate vault for the same pubkey
     error InvalidOperator(); // Error thrown when try to find invalid operator
     error OperatorVaultNotFound(); // Error thrown when there is no corresponding vault of an operator
+    error InvalidPubKeyLength();
+    error InvalidCredentialsLength();
+    error InvalidSignatureLength();
 
     struct InitParams {
         address vaultConfigurator;
@@ -21,10 +24,18 @@ interface IZeroGravityFactory {
         address resolver;
         address operatorVaultOptInService;
         address operatorNetworkOptInService;
+        address rewarderFactory;
+        bytes32 rewarderInitCodeHash;
     }
 
     event ValidatorCreated(
-        bytes pubkey, bytes credentials, bytes signature, address collateral, address vault, address operator
+        bytes pubkey,
+        bytes credentials,
+        bytes signature,
+        address collateral,
+        address rewarder,
+        address vault,
+        address operator
     );
 
     function createValidator(
