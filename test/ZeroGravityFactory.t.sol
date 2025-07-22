@@ -122,7 +122,7 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         vm.stopPrank();
     }
 
-    function test_CreateValidatorRevertVaultCreated() public {
+    function test_CreateValidatorResubmitSignature() public {
         network.updateCollateralConfig(address(zgtoken), 32 * 1e18);
         address val = makeAddr("validator#0");
         _topUpTokens(val);
@@ -132,7 +132,6 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
 
         val = makeAddr("validator#1");
         _topUpTokens(val);
-        vm.expectRevert(IZeroGravityFactory.VaultCreated.selector);
         vm.startPrank(val);
         network.createValidator(new bytes(48), new bytes(32), new bytes(96), address(val), address(zgtoken), 32 * 1e18);
         vm.stopPrank();

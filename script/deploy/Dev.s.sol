@@ -51,6 +51,7 @@ contract DevScript is CoreScript, ZeroGravityScript {
         Token zgtoken = Token(vm.parseJsonAddress(sjson, ".ZG"));
         Token eth = Token(vm.parseJsonAddress(sjson, ".ETH"));
         if (index == 0) {
+            // register with invalid signature
             pubkey =
                 hex"a825c1eb32f341160b831534c10b76b381090d182554cc821d25a513ef6b4793269a7d51a694d6e5045cc314219ea76f";
             cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d4";
@@ -59,11 +60,30 @@ contract DevScript is CoreScript, ZeroGravityScript {
             token = address(zgtoken);
             amount = 64 * 1e18;
         } else if (index == 1) {
+            // register with invalid signature
             pubkey =
-                hex"92d5362bcef04e374264e7a7446e20dc37fc13efd36834496a1afc9d04531a83603452fa924b9ed60e0103193848b721";
+                hex"b414ef38610991785c0c31ed315a95c942edab663e154ed85a6b1b64dda00a31f80d13f04e48e6b3a25297d6f75e4738";
             cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d5";
             sig =
                 hex"b67b5524e59801793b4268e93f492751365d59fb9686959b560ee5bdcede7a9ecd02a990f2301e50190593a33c6b1d3a00f939551d724ce5431ad99eac0d760e38a5346c64a8ec27a056c083e8fe61928843f7d3bf9f81b7b0cef19e9ff7faf8";
+            token = address(eth);
+            amount = 5 * 1e18;
+        } else if (index == 2) {
+            // register with valid signature
+            pubkey =
+                hex"a825c1eb32f341160b831534c10b76b381090d182554cc821d25a513ef6b4793269a7d51a694d6e5045cc314219ea76f";
+            cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d4";
+            sig =
+                hex"982dda0cffe8e37f723bb23f30f55ac0a4bbda4d19e881232a92f9abd0bb2f8980844216e59f56793833acbdc60dbbeb0df4bc380fea80ab1bbe9f40df6de180986e5139c5390956bbeee5196f2abd8b965bba8c2478a040a2820726930aad57";
+            token = address(zgtoken);
+            amount = 64 * 1e18;
+        } else if (index == 3) {
+            // register with valid signature
+            pubkey =
+                hex"b414ef38610991785c0c31ed315a95c942edab663e154ed85a6b1b64dda00a31f80d13f04e48e6b3a25297d6f75e4738";
+            cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d5";
+            sig =
+                hex"b83f8662a25085ee0865cef42a4e336c66eb6998e28b25d39445b27a6124848e659d9b3f615eb52ffc70d4a28bd4902e122df1fdfbe29a71581bd8e2e51656e1b7b5cd2f4032fb672ee90b157805541a73fcaba7dcf3945ba939bd1eb3556935";
             token = address(eth);
             amount = 5 * 1e18;
         }

@@ -27,7 +27,9 @@ import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddleware.sol";
 import {Create2Helper} from "./libraries/Create2Helper.sol";
 import {Constants} from "./libraries/Constants.sol";
 
-contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
+import {PauseControl} from "./security/PauseControl.sol";
+
+contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
     using EnumerableMap for EnumerableMap.AddressToUintMap;
     using EnumerableSet for EnumerableSet.AddressSet;
     using SafeERC20 for IERC20;
@@ -51,7 +53,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         bytes32 rewarderInitCodeHash; // init code hash for rewarder in rewarder factory
         EnumerableMap.AddressToUintMap minValidatorDeposit; // minimal amount to deposit when create validator
         mapping(bytes32 => address) operators; // create2 salt => operator address
-        mapping(address => mapping(address => bool)) createdVaults; // operator => collateral => created
+        mapping(address => mapping(address => address)) createdVaults; // operator => collateral => created vault
     }
 
     // keccak256(abi.encode(uint256(keccak256("0g.storage.ZeroGravityFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -82,6 +84,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         __AccessControl_init();
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(UPDATE_COLLATERAL_ROLE, msg.sender);
+        _grantRole(PAUSER_ROLE, msg.sender);
 
         InitParams memory p;
         p = abi.decode(params, (InitParams));
@@ -120,6 +123,11 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         INetworkMiddlewareService(networkMiddlewareService).setMiddleware(middleware);
     }
 
+    function updateRewarderInitCodeHash(bytes32 hash) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        $.rewarderInitCodeHash = hash;
+    }
+
     function updateCollateralConfig(
         address collateral,
         uint256 minValidatorDeposit
@@ -151,7 +159,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         address onBehalfOf,
         address collateral,
         uint256 amount
-    ) external override {
+    ) external whenNotPaused override {
         if (pubkey.length != PUBLIC_KEY_LENGTH) {
             revert InvalidPubKeyLength();
         }
@@ -177,13 +185,19 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
             IERC20(collateral).safeTransferFrom(msg.sender, address(this), amount);
             amount = IERC20(collateral).balanceOf(address(this)) - balanceBefore;
         }
+        // calculate rewarder
+        address rewarder =
+            Create2Helper.computeCreate2Address($.rewarderFactory, _rewarderSalt(pubkey), $.rewarderInitCodeHash);
         // create operator contract, register in registry
         address operator = _createOperatorIfNotExists(pubkey);
         // create vault, delegator, slasher
-        if ($.createdVaults[operator][collateral]) {
-            revert VaultCreated();
+        if ($.createdVaults[operator][collateral] != address(0)) {
+            // can be used to resubmit signature
+            emit ValidatorCreated(
+                pubkey, credentials, signature, collateral, rewarder, $.createdVaults[operator][collateral], operator
+            );
+            return;
         }
-        $.createdVaults[operator][collateral] = true;
         (address vault, address delegator, address slasher) = IVaultConfigurator($.vaultConfigurator).create(
             IVaultConfigurator.InitParams({
                 version: $.vaultVersion,
@@ -226,6 +240,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
                 )
             })
         );
+        $.createdVaults[operator][collateral] = vault;
         // network opt into the vault
         IBaseDelegator(delegator).setMaxNetworkLimit(DEFAULT_SUBNETWORK, type(uint256).max);
         // set resovler for veto slasher
@@ -236,9 +251,6 @@ contract ZeroGravityFactory is IZeroGravityFactory, AccessControlUpgradeable {
         );
         // register operator and vault to middleware
         IOperators($.middleware).registerOperator(operator, pubkey, vault);
-        // calculate rewarder
-        address rewarder =
-            Create2Helper.computeCreate2Address($.rewarderFactory, _rewarderSalt(pubkey), $.rewarderInitCodeHash);
         emit ValidatorCreated(pubkey, credentials, signature, collateral, rewarder, vault, operator);
 
         // deposit on behalf of sender
