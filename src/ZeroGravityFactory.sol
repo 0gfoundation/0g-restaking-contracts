@@ -25,7 +25,6 @@ import {IZeroGravityOperator} from "./interfaces/IZeroGravityOperator.sol";
 import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddleware.sol";
 
 import {Create2Helper} from "./libraries/Create2Helper.sol";
-import {Constants} from "./libraries/Constants.sol";
 
 import {PauseControl} from "./security/PauseControl.sol";
 
@@ -106,12 +105,6 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         $.rewarderInitCodeHash = p.rewarderInitCodeHash;
     }
 
-    function _rewarderSalt(
-        bytes memory pubkey
-    ) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(Constants.SYMBIOTIC_DOMAIN, pubkey));
-    }
-
     function registerNetwork(
         address middleware,
         address networkRegistry,
@@ -123,7 +116,9 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         INetworkMiddlewareService(networkMiddlewareService).setMiddleware(middleware);
     }
 
-    function updateRewarderInitCodeHash(bytes32 hash) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateRewarderInitCodeHash(
+        bytes32 hash
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
         $.rewarderInitCodeHash = hash;
     }
@@ -159,7 +154,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         address onBehalfOf,
         address collateral,
         uint256 amount
-    ) external whenNotPaused override {
+    ) external override whenNotPaused {
         if (pubkey.length != PUBLIC_KEY_LENGTH) {
             revert InvalidPubKeyLength();
         }
@@ -187,7 +182,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         }
         // calculate rewarder
         address rewarder =
-            Create2Helper.computeCreate2Address($.rewarderFactory, _rewarderSalt(pubkey), $.rewarderInitCodeHash);
+            Create2Helper.computeCreate2Address($.rewarderFactory, keccak256(pubkey), $.rewarderInitCodeHash);
         // create operator contract, register in registry
         address operator = _createOperatorIfNotExists(pubkey);
         // create vault, delegator, slasher
