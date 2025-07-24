@@ -15,6 +15,7 @@ contract RewarderFactory is IRewarderFactory, AccessControlUpgradeable {
         address rewarderBeacon;
         address restakingStates;
         mapping(bytes32 => address) rewarders;
+        mapping(address => bytes) pubkeys;
     }
 
     // keccak256(abi.encode(uint256(keccak256("0g.restaking.RewarderFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -39,7 +40,7 @@ contract RewarderFactory is IRewarderFactory, AccessControlUpgradeable {
         $.restakingStates = restakingStates;
     }
 
-    function rewarderInitCodeHash() public view returns (bytes32) {
+    function rewarderInitCodeHash() public view override returns (bytes32) {
         RewarderFactoryStorage storage $ = _getRewarderFactoryStorage();
         bytes memory initData = abi.encodeCall(IRewarder.initialize, ($.restakingStates));
         bytes memory constructorArgs = abi.encode($.rewarderBeacon, initData);
@@ -49,7 +50,7 @@ contract RewarderFactory is IRewarderFactory, AccessControlUpgradeable {
 
     function previewRewarder(
         bytes memory pubkey
-    ) external view returns (address) {
+    ) external view override returns (address) {
         if (pubkey.length != PUBLIC_KEY_LENGTH) {
             revert InvalidPubKeyLength();
         }
@@ -58,7 +59,7 @@ contract RewarderFactory is IRewarderFactory, AccessControlUpgradeable {
 
     function getRewarder(
         bytes memory pubkey
-    ) external view returns (address) {
+    ) external view override returns (address) {
         if (pubkey.length != PUBLIC_KEY_LENGTH) {
             revert InvalidPubKeyLength();
         }
@@ -66,9 +67,16 @@ contract RewarderFactory is IRewarderFactory, AccessControlUpgradeable {
         return $.rewarders[keccak256(pubkey)];
     }
 
+    function getPubkey(
+        address rewarder
+    ) external view override returns (bytes memory) {
+        RewarderFactoryStorage storage $ = _getRewarderFactoryStorage();
+        return $.pubkeys[rewarder];
+    }
+
     function create(
         bytes memory pubkey
-    ) external {
+    ) external override {
         if (pubkey.length != PUBLIC_KEY_LENGTH) {
             revert InvalidPubKeyLength();
         }
@@ -77,10 +85,14 @@ contract RewarderFactory is IRewarderFactory, AccessControlUpgradeable {
         if ($.restakingStates == address(0)) {
             revert EmptyRestakingStates();
         }
+        if ($.rewarders[keccak256(pubkey)] != address(0)) {
+            revert RewarderAlreadyDeployed();
+        }
         BeaconProxy rewarder = new BeaconProxy{salt: keccak256(pubkey)}(
             address($.rewarderBeacon), abi.encodeCall(IRewarder.initialize, ($.restakingStates))
         );
         $.rewarders[keccak256(pubkey)] = address(rewarder);
+        $.pubkeys[address(rewarder)] = pubkey;
         emit RewarderCreated(pubkey, address(rewarder));
     }
 }

@@ -32,13 +32,15 @@ import {ZeroGravityFactory} from "../src/ZeroGravityFactory.sol";
 import {ZeroGravityMiddleware} from "../src/ZeroGravityMiddleware.sol";
 import {ZeroGravityOperator} from "../src/ZeroGravityOperator.sol";
 
-contract ZeroGravityBaseTest is Test {
+import {RewarderFactoryTest} from "./RewarderFactory.t.sol";
+
+contract ZeroGravityBaseTest is RewarderFactoryTest {
     uint48 public constant VAULT_EPOCH_DURATION = 2 weeks;
     uint48 public constant VETO_DURATION = 1 days;
     uint48 public constant RESOLVER_SET_EPOCHS_DELAY = 1 days;
     uint48 public constant SLASHING_WINDOW = 1 weeks;
 
-    address owner;
+    address private owner;
     address alice;
     uint256 alicePrivateKey;
     address bob;
@@ -96,8 +98,8 @@ contract ZeroGravityBaseTest is Test {
             resolver: resolver,
             operatorVaultOptInService: address(operatorVaultOptInService),
             operatorNetworkOptInService: address(operatorNetworkOptInService),
-            rewarderFactory: address(0),
-            rewarderInitCodeHash: bytes32(0)
+            rewarderFactory: address(rewarderFactory),
+            rewarderInitCodeHash: rewarderFactory.rewarderInitCodeHash()
         });
     }
 
@@ -113,7 +115,9 @@ contract ZeroGravityBaseTest is Test {
         });
     }
 
-    function setUp() public virtual {
+    function setUp() public virtual override {
+        super.setUp();
+
         vm.warp(1 days * 365);
 
         _deploySymbiotic();

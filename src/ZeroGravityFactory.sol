@@ -168,6 +168,9 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         }
 
         ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        if ($.rewarderFactory == address(0) || $.rewarderInitCodeHash == bytes32(0)) {
+            revert MissingRewarderCreate2Info();
+        }
         // check collateral, transfer to contract
         if (!$.minValidatorDeposit.contains(collateral)) {
             revert InvalidCollateral();

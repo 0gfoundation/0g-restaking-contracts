@@ -10,6 +10,7 @@ interface IZeroGravityFactory {
     error InvalidPubKeyLength();
     error InvalidCredentialsLength();
     error InvalidSignatureLength();
+    error MissingRewarderCreate2Info();
 
     struct InitParams {
         address vaultConfigurator;
