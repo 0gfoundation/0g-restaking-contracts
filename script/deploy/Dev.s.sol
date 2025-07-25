@@ -15,6 +15,7 @@ import {IZeroGravityMiddleware} from "../../src/interfaces/IZeroGravityMiddlewar
 import {ZeroGravityFactory} from "../../src/ZeroGravityFactory.sol";
 import {ZeroGravityMiddleware} from "../../src/ZeroGravityMiddleware.sol";
 import {ZeroGravityOperator} from "../../src/ZeroGravityOperator.sol";
+import {RewarderFactory} from "../../src/RewarderFactory.sol";
 
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -46,12 +47,9 @@ contract DevScript is CoreScript, ZeroGravityScript {
         vm.stopBroadcast();
     }
 
-    function _registerInfo(
+    function _validatorInfo(
         uint256 index
-    ) internal returns (bytes memory pubkey, bytes memory cred, bytes memory sig, address token, uint256 amount) {
-        (string memory sjson,) = loadOrInitJson("symbiotic");
-        Token zgtoken = Token(vm.parseJsonAddress(sjson, ".ZG"));
-        Token eth = Token(vm.parseJsonAddress(sjson, ".ETH"));
+    ) internal pure returns (bytes memory pubkey, bytes memory cred, bytes memory sig) {
         if (index == 0) {
             // register with invalid signature
             pubkey =
@@ -59,8 +57,6 @@ contract DevScript is CoreScript, ZeroGravityScript {
             cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d4";
             sig =
                 hex"a05db8993b86aafa2e685253c5de13f76ecf84d2ebd29ac305444b72d17e5a95671d9aaf91a528aab6c5931b8ea0c94505acd5e0a84eb7109618d797a939fc1fa88fdab09c2a77d1ec0ff30f58df90838f8bfd2c9e2917bc1c0436858c0fa617";
-            token = address(zgtoken);
-            amount = 64 * 1e18;
         } else if (index == 1) {
             // register with invalid signature
             pubkey =
@@ -68,8 +64,6 @@ contract DevScript is CoreScript, ZeroGravityScript {
             cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d5";
             sig =
                 hex"b67b5524e59801793b4268e93f492751365d59fb9686959b560ee5bdcede7a9ecd02a990f2301e50190593a33c6b1d3a00f939551d724ce5431ad99eac0d760e38a5346c64a8ec27a056c083e8fe61928843f7d3bf9f81b7b0cef19e9ff7faf8";
-            token = address(eth);
-            amount = 5 * 1e18;
         } else if (index == 2) {
             // register with valid signature
             pubkey =
@@ -77,8 +71,6 @@ contract DevScript is CoreScript, ZeroGravityScript {
             cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d4";
             sig =
                 hex"982dda0cffe8e37f723bb23f30f55ac0a4bbda4d19e881232a92f9abd0bb2f8980844216e59f56793833acbdc60dbbeb0df4bc380fea80ab1bbe9f40df6de180986e5139c5390956bbeee5196f2abd8b965bba8c2478a040a2820726930aad57";
-            token = address(zgtoken);
-            amount = 64 * 1e18;
         } else if (index == 3) {
             // register with valid signature
             pubkey =
@@ -86,6 +78,26 @@ contract DevScript is CoreScript, ZeroGravityScript {
             cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d5";
             sig =
                 hex"b83f8662a25085ee0865cef42a4e336c66eb6998e28b25d39445b27a6124848e659d9b3f615eb52ffc70d4a28bd4902e122df1fdfbe29a71581bd8e2e51656e1b7b5cd2f4032fb672ee90b157805541a73fcaba7dcf3945ba939bd1eb3556935";
+        }
+    }
+
+    function _registerInfo(
+        uint256 index
+    ) internal returns (bytes memory pubkey, bytes memory cred, bytes memory sig, address token, uint256 amount) {
+        (string memory sjson,) = loadOrInitJson("symbiotic");
+        Token zgtoken = Token(vm.parseJsonAddress(sjson, ".ZG"));
+        Token eth = Token(vm.parseJsonAddress(sjson, ".ETH"));
+        (pubkey, cred, sig) = _validatorInfo(index);
+        if (index == 0) {
+            token = address(zgtoken);
+            amount = 64 * 1e18;
+        } else if (index == 1) {
+            token = address(eth);
+            amount = 5 * 1e18;
+        } else if (index == 2) {
+            token = address(zgtoken);
+            amount = 64 * 1e18;
+        } else if (index == 3) {
             token = address(eth);
             amount = 5 * 1e18;
         }
@@ -172,6 +184,23 @@ contract DevScript is CoreScript, ZeroGravityScript {
                 IVault(vaults[i]).withdraw(owner, amount);
             }
         }
+
+        vm.stopBroadcast();
+    }
+
+    function createRewarder(
+        uint256 index
+    ) public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY_0G");
+
+        (string memory json,) = loadOrInitJson("rewarder");
+
+        vm.startBroadcast(privKey);
+
+        RewarderFactory rewarderFactory = RewarderFactory(vm.parseJsonAddress(json, ".RewarderFactory"));
+        (bytes memory pubkey,,) = _validatorInfo(index);
+        rewarderFactory.create(pubkey);
+        console2.log("created rewarder: ", rewarderFactory.getRewarder(pubkey));
 
         vm.stopBroadcast();
     }
