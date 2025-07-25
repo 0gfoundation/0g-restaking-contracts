@@ -10,30 +10,13 @@ import {RewarderFactory} from "../src/RewarderFactory.sol";
 import {Rewarder} from "../src/Rewarder.sol";
 import {RestakingStates} from "../src/RestakingStates.sol";
 
-contract RewarderFactoryTest is Test {
-    address private owner;
-    RestakingStates restakingStates;
-    RewarderFactory rewarderFactory;
+import {IRewarderFactory} from "../src/interfaces/IRewarderFactory.sol";
 
-    function setUp() public virtual {
-        owner = address(this);
+import {RewarderBaseTest} from "./RewarderBase.t.sol";
 
-        Rewarder rewarderImpl = new Rewarder();
-        UpgradeableBeacon rewarderBeacon = new UpgradeableBeacon(address(rewarderImpl), owner);
-
-        RestakingStates statesImpl = new RestakingStates();
-        UpgradeableBeacon statesBeacon = new UpgradeableBeacon(address(statesImpl), owner);
-        BeaconProxy statesProxy =
-            new BeaconProxy(address(statesBeacon), abi.encodeCall(RestakingStates.initialize, (1)));
-        restakingStates = RestakingStates(address(statesProxy));
-
-        RewarderFactory factoryImpl = new RewarderFactory();
-        UpgradeableBeacon factoryBeacon = new UpgradeableBeacon(address(factoryImpl), owner);
-        BeaconProxy factoryProxy = new BeaconProxy(
-            address(factoryBeacon),
-            abi.encodeCall(RewarderFactory.initialize, (address(rewarderBeacon), address(restakingStates)))
-        );
-        rewarderFactory = RewarderFactory(address(factoryProxy));
+contract RewarderFactoryTest is RewarderBaseTest {
+    function setUp() public virtual override {
+        super.setUp();
     }
 
     function test_create() public {
@@ -49,5 +32,12 @@ contract RewarderFactoryTest is Test {
             address rewarder = rewarderFactory.previewRewarder(pubkey);
             assertEq(rewarderFactory.getPubkey(rewarder), pubkey);
         }
+    }
+
+    function test_createRevertRewarderAlreadyDeployed() public {
+        bytes memory pubkey = bytes.concat(abi.encode(1), new bytes(16));
+        rewarderFactory.create(pubkey);
+        vm.expectRevert(IRewarderFactory.RewarderAlreadyDeployed.selector);
+        rewarderFactory.create(pubkey);
     }
 }
