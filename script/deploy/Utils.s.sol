@@ -8,9 +8,14 @@ contract JsonUtils is Script {
     function loadOrInitJson(
         string memory task
     ) internal returns (string memory json, string memory path) {
-        path = string.concat(
-            vm.projectRoot(), "/deployments/", string.concat(task, "-", vm.toString(block.chainid)), ".json"
-        );
+        return loadOrInitJsonWithChainId(task, block.chainid);
+    }
+
+    function loadOrInitJsonWithChainId(
+        string memory task,
+        uint256 chainId
+    ) internal returns (string memory json, string memory path) {
+        path = string.concat(vm.projectRoot(), "/deployments/", string.concat(task, "-", vm.toString(chainId)), ".json");
 
         try vm.readFile(path) returns (string memory content) {
             json = content;

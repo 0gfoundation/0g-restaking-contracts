@@ -105,6 +105,15 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         $.rewarderInitCodeHash = p.rewarderInitCodeHash;
     }
 
+    function setRewarderInfo(
+        address rewarderFactory,
+        bytes32 rewarderInitCodeHash
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        $.rewarderFactory = rewarderFactory;
+        $.rewarderInitCodeHash = rewarderInitCodeHash;
+    }
+
     function registerNetwork(
         address middleware,
         address networkRegistry,

@@ -18,6 +18,8 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
         mapping(address => mapping(uint256 => mapping(address => EnumerableMap.AddressToUintMap))) balances;
         // rewarder => domain => (collateral => balance)
         mapping(address => mapping(uint256 => EnumerableMap.AddressToUintMap)) totalSupply;
+        // domain => keccak256(txHash, logIndex) => bool
+        mapping(uint256 => mapping(bytes32 => bool)) submitted;
     }
 
     // keccak256(abi.encode(uint256(keccak256("0g.restaking.RestakingStates")) - 1)) & ~bytes32(uint256(0xff))
@@ -119,13 +121,25 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
         emit WeightUpdated(domain, collateral, weight);
     }
 
+    modifier checkSubmitted(uint256 domain, bytes32 txHash, uint256 logIndex) {
+        RestakingStatesStorage storage $ = _getRestakingStatesStorage();
+        bytes32 hash = keccak256(abi.encodePacked(txHash, logIndex));
+        if ($.submitted[domain][hash]) {
+            revert ErrDuplicateSubmission();
+        }
+        $.submitted[domain][hash] = true;
+        _;
+    }
+
     function deposit(
         uint256 domain,
+        bytes32 txHash,
+        uint256 logIndex,
         address rewarder,
         address account,
         address collateral,
         uint256 amount
-    ) external onlyRole(UPDATE_ROLE) {
+    ) external onlyRole(UPDATE_ROLE) checkSubmitted(domain, txHash, logIndex) {
         RestakingStatesStorage storage $ = _getRestakingStatesStorage();
         IRewarder(rewarder).update(account);
         if (domain >= $.domains) {
@@ -144,11 +158,13 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
 
     function withdraw(
         uint256 domain,
+        bytes32 txHash,
+        uint256 logIndex,
         address rewarder,
         address account,
         address collateral,
         uint256 amount
-    ) external onlyRole(UPDATE_ROLE) {
+    ) external onlyRole(UPDATE_ROLE) checkSubmitted(domain, txHash, logIndex) {
         RestakingStatesStorage storage $ = _getRestakingStatesStorage();
         IRewarder(rewarder).update(account);
         if (domain >= $.domains) {

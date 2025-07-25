@@ -39,7 +39,9 @@ contract ZeroGravityScript is Script, JsonUtils {
     uint48 public constant RESOLVER_SET_EPOCHS_DELAY = 1 days;
     uint48 public constant SLASHING_WINDOW = 1 weeks;
 
-    function run() public virtual {
+    function run(
+        uint256 zgChainId
+    ) public virtual {
         uint256 privKey = vm.envUint("PRIVATE_KEY");
         address owner = vm.addr(privKey);
 
@@ -48,6 +50,8 @@ contract ZeroGravityScript is Script, JsonUtils {
         (, string memory path) = loadOrInitJson(obj);
         (string memory json,) = loadOrInitJson("symbiotic");
 
+        (string memory rjson,) = loadOrInitJsonWithChainId("rewarder", zgChainId);
+
         vm.startBroadcast(privKey);
 
         // use owner as resolver
@@ -55,6 +59,8 @@ contract ZeroGravityScript is Script, JsonUtils {
 
         // operator beacon
         ZeroGravityOperator operatorImpl = new ZeroGravityOperator();
+        vm.serializeAddress(obj, "OperatorImpl", address(operatorImpl));
+
         UpgradeableBeacon operatorBeacon = new UpgradeableBeacon(address(operatorImpl), owner);
         vm.serializeAddress(obj, "OperatorBeacon", address(operatorBeacon));
 
@@ -73,8 +79,8 @@ contract ZeroGravityScript is Script, JsonUtils {
             resolver: resolver,
             operatorVaultOptInService: vm.parseJsonAddress(json, ".OperatorVaultOptInService"),
             operatorNetworkOptInService: vm.parseJsonAddress(json, ".OperatorNetworkOptInService"),
-            rewarderFactory: address(0),
-            rewarderInitCodeHash: bytes32(0)
+            rewarderFactory: vm.parseJsonAddress(rjson, ".RewarderFactory"),
+            rewarderInitCodeHash: vm.parseJsonBytes32(rjson, ".RewarderInitCodeHash")
         });
 
         // network

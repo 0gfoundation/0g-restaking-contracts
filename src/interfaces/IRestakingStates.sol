@@ -4,6 +4,7 @@ pragma solidity ^0.8.25;
 interface IRestakingStates {
     error ErrSmallerNewDomain();
     error ErrInvalidDomain();
+    error ErrDuplicateSubmission();
 
     event WeightUpdated(uint256 domain, address collateral, uint256 weight);
     event BalanceUpdated(uint256 domain, address rewarder, address account, address collateral, uint256 amount);

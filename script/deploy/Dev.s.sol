@@ -21,9 +21,11 @@ import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 import {Token} from "../../test/mocks/Token.sol";
 
 contract DevScript is CoreScript, ZeroGravityScript {
-    function run() public override(CoreScript, ZeroGravityScript) {
+    function run(
+        uint256 zgChainId
+    ) public override(ZeroGravityScript) {
         CoreScript.run();
-        ZeroGravityScript.run();
+        ZeroGravityScript.run(zgChainId);
 
         uint256 privKey = vm.envUint("PRIVATE_KEY");
 
