@@ -197,67 +197,68 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
             Create2Helper.computeCreate2Address($.rewarderFactory, keccak256(pubkey), $.rewarderInitCodeHash);
         // create operator contract, register in registry
         address operator = _createOperatorIfNotExists(pubkey);
-        // create vault, delegator, slasher
-        if ($.createdVaults[operator][collateral] != address(0)) {
-            // can be used to resubmit signature
-            emit ValidatorCreated(
-                pubkey, credentials, signature, collateral, rewarder, $.createdVaults[operator][collateral], operator
-            );
-            return;
-        }
-        (address vault, address delegator, address slasher) = IVaultConfigurator($.vaultConfigurator).create(
-            IVaultConfigurator.InitParams({
-                version: $.vaultVersion,
-                owner: address(this),
-                vaultParams: abi.encode(
-                    IVault.InitParams({
-                        collateral: address(collateral),
-                        burner: address(0xdead),
-                        epochDuration: $.epochDuration,
-                        depositWhitelist: false,
-                        isDepositLimit: false,
-                        depositLimit: 0,
-                        defaultAdminRoleHolder: address(this),
-                        depositWhitelistSetRoleHolder: address(0),
-                        depositorWhitelistRoleHolder: address(0),
-                        isDepositLimitSetRoleHolder: address(0),
-                        depositLimitSetRoleHolder: address(0)
-                    })
-                ),
-                delegatorIndex: $.delegatorVersion,
-                delegatorParams: abi.encode(
-                    IOperatorNetworkSpecificDelegator.InitParams({
-                        baseParams: IBaseDelegator.BaseParams({
+        // create vault, delegator, slasher if not created
+        address vault;
+        if ($.createdVaults[operator][collateral] == address(0)) {
+            address delegator;
+            address slasher;
+            (vault, delegator, slasher) = IVaultConfigurator($.vaultConfigurator).create(
+                IVaultConfigurator.InitParams({
+                    version: $.vaultVersion,
+                    owner: address(this),
+                    vaultParams: abi.encode(
+                        IVault.InitParams({
+                            collateral: address(collateral),
+                            burner: address(0xdead),
+                            epochDuration: $.epochDuration,
+                            depositWhitelist: false,
+                            isDepositLimit: false,
+                            depositLimit: 0,
                             defaultAdminRoleHolder: address(this),
-                            hook: address(0),
-                            hookSetRoleHolder: address(0)
-                        }),
-                        network: address(this),
-                        operator: operator
-                    })
-                ),
-                withSlasher: true,
-                slasherIndex: $.slasherVersion,
-                slasherParams: abi.encode(
-                    IVetoSlasher.InitParams({
-                        baseParams: IBaseSlasher.BaseParams({isBurnerHook: false}),
-                        vetoDuration: $.vetoDuration,
-                        resolverSetEpochsDelay: $.resolverSetEpochsDelay
-                    })
-                )
-            })
-        );
-        $.createdVaults[operator][collateral] = vault;
-        // network opt into the vault
-        IBaseDelegator(delegator).setMaxNetworkLimit(DEFAULT_SUBNETWORK, type(uint256).max);
-        // set resovler for veto slasher
-        IVetoSlasher(slasher).setResolver(DEFAULT_SUBNETWORK, $.resolver, "");
-        // operator opt in network and vault
-        IZeroGravityOperator(operator).optIn(
-            $.operatorVaultOptInService, vault, $.operatorNetworkOptInService, address(this)
-        );
-        // register operator and vault to middleware
-        IOperators($.middleware).registerOperator(operator, pubkey, vault);
+                            depositWhitelistSetRoleHolder: address(0),
+                            depositorWhitelistRoleHolder: address(0),
+                            isDepositLimitSetRoleHolder: address(0),
+                            depositLimitSetRoleHolder: address(0)
+                        })
+                    ),
+                    delegatorIndex: $.delegatorVersion,
+                    delegatorParams: abi.encode(
+                        IOperatorNetworkSpecificDelegator.InitParams({
+                            baseParams: IBaseDelegator.BaseParams({
+                                defaultAdminRoleHolder: address(this),
+                                hook: address(0),
+                                hookSetRoleHolder: address(0)
+                            }),
+                            network: address(this),
+                            operator: operator
+                        })
+                    ),
+                    withSlasher: true,
+                    slasherIndex: $.slasherVersion,
+                    slasherParams: abi.encode(
+                        IVetoSlasher.InitParams({
+                            baseParams: IBaseSlasher.BaseParams({isBurnerHook: false}),
+                            vetoDuration: $.vetoDuration,
+                            resolverSetEpochsDelay: $.resolverSetEpochsDelay
+                        })
+                    )
+                })
+            );
+            $.createdVaults[operator][collateral] = vault;
+            // network opt into the vault
+            IBaseDelegator(delegator).setMaxNetworkLimit(DEFAULT_SUBNETWORK, type(uint256).max);
+            // set resovler for veto slasher
+            IVetoSlasher(slasher).setResolver(DEFAULT_SUBNETWORK, $.resolver, "");
+            // operator opt in network and vault
+            IZeroGravityOperator(operator).optIn(
+                $.operatorVaultOptInService, vault, $.operatorNetworkOptInService, address(this)
+            );
+            // register operator and vault to middleware
+            IOperators($.middleware).registerOperator(operator, pubkey, vault);
+        }
+
+        vault = $.createdVaults[operator][collateral];
+        // emit event anyways, can be used to resubmit signature
         emit ValidatorCreated(pubkey, credentials, signature, collateral, rewarder, vault, operator);
 
         // deposit on behalf of sender

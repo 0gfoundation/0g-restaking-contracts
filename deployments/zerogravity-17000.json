@@ -1,0 +1,11 @@
+{
+  "BaseMiddlewareReader": "0x56563413ccA3FB2dC8354bE3fB2aA9dee106D1E5",
+  "OperatorBeacon": "0x4BC6bf615c371D2826084b688066580e848a8DE3",
+  "OperatorImpl": "0x1F655101B582d7a1A3B75DAb2dCeE41DFf8CccB5",
+  "ZeroGravityFactory": "0x3A7E357602FD8128Ad11eF950C21f281a0B201F5",
+  "ZeroGravityFactoryBeacon": "0x22f70CDA82Fc134F244Ee0fe8703c98AAA633436",
+  "ZeroGravityFactoryImpl": "0x5ea8438fc6A9bD2a0AD41203b218aF21355bC883",
+  "ZeroGravityMiddleware": "0x1E3762CE6a15b686855926D18cE29c23D7EbA9C7",
+  "ZeroGravityMiddlewareBeacon": "0x8eBFFF8504e57e9424d40060fb58fD2c1eff110b",
+  "ZeroGravityMiddlewareImpl": "0x3Dc9a976Afa3a4AcB72a3163E780d117b94de017"
+}

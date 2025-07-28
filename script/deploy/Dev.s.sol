@@ -25,7 +25,7 @@ contract DevScript is CoreScript, ZeroGravityScript {
     function run(
         uint256 zgChainId
     ) public override(ZeroGravityScript) {
-        CoreScript.run();
+        // CoreScript.run();
         ZeroGravityScript.run(zgChainId);
 
         uint256 privKey = vm.envUint("PRIVATE_KEY");
@@ -70,7 +70,7 @@ contract DevScript is CoreScript, ZeroGravityScript {
                 hex"a825c1eb32f341160b831534c10b76b381090d182554cc821d25a513ef6b4793269a7d51a694d6e5045cc314219ea76f";
             cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d4";
             sig =
-                hex"982dda0cffe8e37f723bb23f30f55ac0a4bbda4d19e881232a92f9abd0bb2f8980844216e59f56793833acbdc60dbbeb0df4bc380fea80ab1bbe9f40df6de180986e5139c5390956bbeee5196f2abd8b965bba8c2478a040a2820726930aad57";
+                hex"a2c12748d219e419d6d0b365bac70f55818c7118bfd78a7f9fe04afcff9071c73f17b5311e07aedf2f26718f91e28e3602828866e77281d3aecfdac3acef0613aff0d86c4b58cf5d3e8fcb5608c315443d59ab3816d093edebc0084057468af4";
         } else if (index == 3) {
             // register with valid signature
             pubkey =

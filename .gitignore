@@ -6,7 +6,12 @@ out/
 /broadcast
 /broadcast/*/31337/
 /broadcast/**/dry-run/
-/deployments
+
+# Deployments
+deployments/**
+!deployments/symbiotic-17000.json
+!deployments/zerogravity-17000.json
+!deployments/rewarder-16601.json
 
 # Docs
 docs/
@@ -22,6 +27,8 @@ abigen/
 
 # dev scripts
 run.sh
+config.sh
+upgrade.sh
 deposit.sh
 register.sh
 withdraw.sh
