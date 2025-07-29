@@ -24,7 +24,7 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
 
     // keccak256(abi.encode(uint256(keccak256("0g.restaking.RestakingStates")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant RestakingStatesStorageLocation =
-        0xcaab44e7726ab2cc723db0b51eeedd28b68cd6b479b94dcfdcadc4f8ff1fc900;
+        0x4343d365237c91901669a344b875c5bb84fe5cbcba50b64e06e6d6fc67e1cc00;
 
     function _getRestakingStatesStorage() internal pure returns (RestakingStatesStorage storage $) {
         assembly {
@@ -141,7 +141,7 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
         uint256 amount
     ) external onlyRole(UPDATE_ROLE) checkSubmitted(domain, txHash, logIndex) {
         RestakingStatesStorage storage $ = _getRestakingStatesStorage();
-        IRewarder(rewarder).update(account);
+        IRewarder(rewarder).update(account, domain, collateral);
         if (domain >= $.domains) {
             revert ErrInvalidDomain();
         }
@@ -166,7 +166,7 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
         uint256 amount
     ) external onlyRole(UPDATE_ROLE) checkSubmitted(domain, txHash, logIndex) {
         RestakingStatesStorage storage $ = _getRestakingStatesStorage();
-        IRewarder(rewarder).update(account);
+        IRewarder(rewarder).update(account, domain, collateral);
         if (domain >= $.domains) {
             revert ErrInvalidDomain();
         }

@@ -25,7 +25,7 @@ contract DevScript is CoreScript, ZeroGravityScript {
     function run(
         uint256 zgChainId
     ) public override(ZeroGravityScript) {
-        // CoreScript.run();
+        CoreScript.run();
         ZeroGravityScript.run(zgChainId);
 
         uint256 privKey = vm.envUint("PRIVATE_KEY");
@@ -70,14 +70,14 @@ contract DevScript is CoreScript, ZeroGravityScript {
                 hex"a825c1eb32f341160b831534c10b76b381090d182554cc821d25a513ef6b4793269a7d51a694d6e5045cc314219ea76f";
             cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d4";
             sig =
-                hex"a2c12748d219e419d6d0b365bac70f55818c7118bfd78a7f9fe04afcff9071c73f17b5311e07aedf2f26718f91e28e3602828866e77281d3aecfdac3acef0613aff0d86c4b58cf5d3e8fcb5608c315443d59ab3816d093edebc0084057468af4";
+                hex"af5224a7b4ee5c2bcd34d8f9c9cab179b6e2bd3bd8339b26eb2279267a936f3b1a5b808715ac2109422cfe0bdbc978b6084dd8cb5cab93401fe2cc4f54148693de1d9d0e063164ec5d98cf7261d67206022c3e8044f33ba8495ceaf40fac7f6c";
         } else if (index == 3) {
             // register with valid signature
             pubkey =
                 hex"b414ef38610991785c0c31ed315a95c942edab663e154ed85a6b1b64dda00a31f80d13f04e48e6b3a25297d6f75e4738";
             cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d5";
             sig =
-                hex"b83f8662a25085ee0865cef42a4e336c66eb6998e28b25d39445b27a6124848e659d9b3f615eb52ffc70d4a28bd4902e122df1fdfbe29a71581bd8e2e51656e1b7b5cd2f4032fb672ee90b157805541a73fcaba7dcf3945ba939bd1eb3556935";
+                hex"8de03cda5303275c16293f45479d88de709f865854c244cc784f549db536b6d9cdd96f5b4afe5e4a55bb05eea4ce6dcc00329550c3628fc9e8edb2b46bcf60c4b3cbc70065633b2c47bb5d8389d82a0e0cdf0424cbecd03e64936b371257cd81";
         }
     }
 

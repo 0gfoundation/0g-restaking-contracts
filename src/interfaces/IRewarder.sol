@@ -8,7 +8,13 @@ interface IRewarder {
         address restakingStates
     ) external;
 
+    function update(address account, uint256 domain, address collateral) external;
+
     function update(
         address account
     ) external;
+
+    function claim(
+        address account
+    ) external returns (uint256 reward);
 }

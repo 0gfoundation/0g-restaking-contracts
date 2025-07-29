@@ -51,16 +51,15 @@ contract Rewarder is IRewarder, ReentrancyGuardUpgradeable {
         }
         (uint256 totalPower, IRestakingStates.Power[] memory powers) =
             IRestakingStates($.restakingStates).getPowers(address(this));
-        if (totalPower == 0) {
-            return;
-        }
-        for (uint256 i = 0; i < powers.length; ++i) {
-            if (powers[i].power == 0) {
-                continue;
+        if (totalPower > 0) {
+            for (uint256 i = 0; i < powers.length; ++i) {
+                if (powers[i].power == 0) {
+                    continue;
+                }
+                uint256 reward = pendingReward * powers[i].power / totalPower;
+                $.accRewardPerShare[powers[i].supply.domain][powers[i].supply.collateral] +=
+                    reward * 1e18 / powers[i].supply.amount;
             }
-            uint256 reward = pendingReward * powers[i].power / totalPower;
-            $.accRewardPerShare[powers[i].supply.domain][powers[i].supply.collateral] +=
-                reward * 1e18 / powers[i].supply.amount;
         }
         $.totalUnclaimedRewards += pendingReward;
     }
@@ -74,32 +73,41 @@ contract Rewarder is IRewarder, ReentrancyGuardUpgradeable {
         IRestakingStates.Balance[] memory balances =
             IRestakingStates($.restakingStates).getBalances(address(this), account);
         for (uint256 i = 0; i < balances.length; ++i) {
-            if (balances[i].amount == 0) {
-                continue;
+            if (balances[i].amount > 0) {
+                // calculate reward
+                uint256 reward = (
+                    $.accRewardPerShare[balances[i].domain][balances[i].collateral]
+                        - $.lastAccRewardPerShare[account][balances[i].domain][balances[i].collateral]
+                ) * balances[i].amount / 1e18;
+                $.unclaimedRewards[account] += reward;
             }
-            // calculate reward
-            uint256 reward = (
-                $.accRewardPerShare[balances[i].domain][balances[i].collateral]
-                    - $.lastAccRewardPerShare[account][balances[i].domain][balances[i].collateral]
-            ) * balances[i].amount / 1e18;
             // update storage
             $.lastAccRewardPerShare[account][balances[i].domain][balances[i].collateral] =
                 $.accRewardPerShare[balances[i].domain][balances[i].collateral];
-            $.unclaimedRewards[account] += reward;
         }
+    }
+
+    function _updateWithCollateral(address account, uint256 domain, address collateral) internal {
+        _update(account);
+        RewarderStorage storage $ = _getRewarderStorage();
+        $.lastAccRewardPerShare[account][domain][collateral] = $.accRewardPerShare[domain][collateral];
     }
 
     function claim(
         address account
-    ) external nonReentrant {
+    ) external override nonReentrant returns (uint256 reward) {
         _update(account);
         // claim reward
         RewarderStorage storage $ = _getRewarderStorage();
-        uint256 reward = $.unclaimedRewards[account];
+        reward = $.unclaimedRewards[account];
         $.unclaimedRewards[account] = 0;
         $.totalUnclaimedRewards -= reward;
         TransferHelper.safeTransferETH(account, reward);
         emit Claimed(account, reward);
+    }
+
+    function update(address account, uint256 domain, address collateral) public override nonReentrant {
+        _updateWithCollateral(account, domain, collateral);
     }
 
     function update(

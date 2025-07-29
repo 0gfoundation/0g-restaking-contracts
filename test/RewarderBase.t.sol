@@ -14,6 +14,8 @@ import {RestakingStates} from "../src/RestakingStates.sol";
 
 import {IRewarderFactory} from "../src/interfaces/IRewarderFactory.sol";
 
+import {Token} from "./mocks/Token.sol";
+
 contract RewarderBaseTest is Test {
     using Strings for uint256;
 
@@ -21,10 +23,10 @@ contract RewarderBaseTest is Test {
     RestakingStates restakingStates;
     RewarderFactory rewarderFactory;
 
-    uint256 internal constant DOMAIN_CNT = 3;
-    uint256 internal constant COLLATERAL_CNT = 10;
-    uint256 internal constant REWARDER_CNT = 5;
-    uint256 internal constant ACCOUNTS_CNT = 10;
+    uint256 DOMAIN_CNT = 3;
+    uint256 COLLATERAL_CNT = 10;
+    uint256 REWARDER_CNT = 5;
+    uint256 ACCOUNTS_CNT = 10;
 
     address[] collaterals;
     address[] rewarders;
@@ -73,7 +75,8 @@ contract RewarderBaseTest is Test {
         }
         // set collateral weights
         for (uint256 i = 0; i < COLLATERAL_CNT; ++i) {
-            collaterals.push(makeAddr(string.concat("collateral#", i.toString())));
+            Token token = new Token(string.concat("collateral#", i.toString()));
+            collaterals.push(address(token));
             decimals[collaterals[i]] = i % 13 + 6;
         }
 
