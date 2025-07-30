@@ -12,9 +12,9 @@ import {RewarderBaseTest} from "./RewarderBase.t.sol";
 
 contract RewarderTest is RewarderBaseTest {
     function setUp() public virtual override {
-        DOMAIN_CNT = 1;
-        COLLATERAL_CNT = 10;
-        REWARDER_CNT = 1;
+        DOMAIN_CNT = 2;
+        COLLATERAL_CNT = 3;
+        REWARDER_CNT = 3;
         ACCOUNTS_CNT = 10;
         super.setUp();
     }
@@ -52,7 +52,7 @@ contract RewarderTest is RewarderBaseTest {
 
     function test_update() public {
         _initialRewarderStates();
-        for (uint256 ops = 0; ops < 10_000;) {
+        for (uint256 ops = 0; ops < 50_000;) {
             // distribute reward to one rewarder
             {
                 address x = rewarders[_nextRng() % REWARDER_CNT];
@@ -119,6 +119,8 @@ contract RewarderTest is RewarderBaseTest {
         for (uint256 i = 0; i < rewarders.length; ++i) {
             address rewarder = rewarders[i];
             for (uint256 j = 0; j < accounts.length; ++j) {
+                _update(rewarder);
+
                 address account = accounts[j];
 
                 uint256 br = rewarder.balance;
