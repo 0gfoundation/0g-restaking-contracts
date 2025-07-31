@@ -123,12 +123,22 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
 
     modifier checkSubmitted(uint256 domain, bytes32 txHash, uint256 logIndex) {
         RestakingStatesStorage storage $ = _getRestakingStatesStorage();
-        bytes32 hash = keccak256(abi.encodePacked(txHash, logIndex));
-        if ($.submitted[domain][hash]) {
+        (bool found, bytes32 hash) = _submitted(domain, txHash, logIndex);
+        if (found) {
             revert ErrDuplicateSubmission();
         }
         $.submitted[domain][hash] = true;
         _;
+    }
+
+    function _submitted(uint256 domain, bytes32 txHash, uint256 logIndex) internal view returns (bool, bytes32) {
+        RestakingStatesStorage storage $ = _getRestakingStatesStorage();
+        bytes32 hash = keccak256(abi.encodePacked(txHash, logIndex));
+        return ($.submitted[domain][hash], hash);
+    }
+
+    function submitted(uint256 domain, bytes32 txHash, uint256 logIndex) public view override returns (bool found) {
+        (found,) = _submitted(domain, txHash, logIndex);
     }
 
     function deposit(

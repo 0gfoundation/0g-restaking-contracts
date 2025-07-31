@@ -20,6 +20,7 @@ interface IRestakingStates {
         uint256 power;
     }
 
+    function submitted(uint256 domain, bytes32 txHash, uint256 logIndex) external view returns (bool found);
     function getDomains() external view returns (uint256);
     function getBalances(address rewarder, address account) external view returns (Balance[] memory balances);
     function getPowers(
