@@ -5,8 +5,9 @@ interface IRestakingStates {
     error ErrSmallerNewDomain();
     error ErrInvalidDomain();
     error ErrDuplicateSubmission();
+    error ErrOutdatedWeight();
 
-    event WeightUpdated(uint256 domain, address collateral, uint256 weight);
+    event WeightUpdated(uint256 domain, address collateral, uint256 weight, uint256 height);
     event BalanceUpdated(uint256 domain, address rewarder, address account, address collateral, uint256 amount);
 
     struct Balance {
@@ -20,7 +21,7 @@ interface IRestakingStates {
         uint256 power;
     }
 
-    function submitted(uint256 domain, bytes32 txHash, uint256 logIndex) external view returns (bool found);
+    function submitted(uint256 domain, uint256 height, uint256 logIndex) external view returns (bool found);
     function getDomains() external view returns (uint256);
     function getBalances(address rewarder, address account) external view returns (Balance[] memory balances);
     function getPowers(

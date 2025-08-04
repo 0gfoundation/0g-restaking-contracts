@@ -71,7 +71,7 @@ contract RewarderTest is RewarderBaseTest {
                 // withdraw
                 uint256 amount = _nextRng() % balances[domain][rewarder][account][collateral] + 1;
 
-                restakingStates.withdraw(domain, bytes32(0), ops, rewarder, account, collateral, amount);
+                restakingStates.withdraw(domain, 0, ops, rewarder, account, collateral, amount);
                 _update(rewarder);
 
                 balances[domain][rewarder][account][collateral] -= amount;
@@ -83,7 +83,7 @@ contract RewarderTest is RewarderBaseTest {
                 // [0, 100) with decimals
                 uint256 amount = _nextRng() % 1e20 / (10 ** (18 - decimals[collateral])) + 1;
 
-                restakingStates.deposit(domain, bytes32(0), ops, rewarder, account, collateral, amount);
+                restakingStates.deposit(domain, 0, ops, rewarder, account, collateral, amount);
                 _update(rewarder);
 
                 balances[domain][rewarder][account][collateral] += amount;
@@ -93,7 +93,7 @@ contract RewarderTest is RewarderBaseTest {
             } else if (op == 2) {
                 // update weight
                 weights[domain][collateral] = _alignedWeight(decimals[collateral], (_nextRng() % 10 + 1) * 1e9);
-                restakingStates.updateWeight(domain, collateral, weights[domain][collateral]);
+                restakingStates.updateWeight(domain, collateral, weights[domain][collateral], 0);
 
                 ++ops;
             } else if (op == 3) {

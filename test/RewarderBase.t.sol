@@ -83,7 +83,7 @@ contract RewarderBaseTest is Test {
         for (uint256 domain = 0; domain < DOMAIN_CNT; ++domain) {
             for (uint256 i = 0; i < COLLATERAL_CNT; ++i) {
                 weights[domain][collaterals[i]] = _alignedWeight(decimals[collaterals[i]], (i + 1) * 1e9);
-                restakingStates.updateWeight(domain, collaterals[i], weights[domain][collaterals[i]]);
+                restakingStates.updateWeight(domain, collaterals[i], weights[domain][collaterals[i]], 0);
             }
         }
     }

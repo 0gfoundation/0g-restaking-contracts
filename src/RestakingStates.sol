@@ -14,11 +14,12 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
     struct RestakingStatesStorage {
         uint256 domains;
         mapping(uint256 => EnumerableMap.AddressToUintMap) weights; // domain => (collateral => weight)
+        mapping(uint256 => mapping(address => uint256)) weightUpdatedAt; // domain => (collateral => height)
         // rewarder => domain => account => (collateral => balance)
         mapping(address => mapping(uint256 => mapping(address => EnumerableMap.AddressToUintMap))) balances;
         // rewarder => domain => (collateral => balance)
         mapping(address => mapping(uint256 => EnumerableMap.AddressToUintMap)) totalSupply;
-        // domain => keccak256(txHash, logIndex) => bool
+        // domain => keccak256(block height, logIndex) => bool
         mapping(uint256 => mapping(bytes32 => bool)) submitted;
     }
 
@@ -112,18 +113,32 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
         $.domains = domains;
     }
 
-    function updateWeight(uint256 domain, address collateral, uint256 weight) external onlyRole(UPDATE_ROLE) {
+    function weightUpdatedAt(uint256 domain, address collateral) external view returns (uint256) {
+        RestakingStatesStorage storage $ = _getRestakingStatesStorage();
+        return $.weightUpdatedAt[domain][collateral];
+    }
+
+    function updateWeight(
+        uint256 domain,
+        address collateral,
+        uint256 weight,
+        uint256 height
+    ) external onlyRole(UPDATE_ROLE) {
         RestakingStatesStorage storage $ = _getRestakingStatesStorage();
         if (domain >= $.domains) {
             revert ErrInvalidDomain();
         }
+        if ($.weightUpdatedAt[domain][collateral] > height) {
+            revert ErrOutdatedWeight();
+        }
         $.weights[domain].set(collateral, weight);
-        emit WeightUpdated(domain, collateral, weight);
+        $.weightUpdatedAt[domain][collateral] = height;
+        emit WeightUpdated(domain, collateral, weight, height);
     }
 
-    modifier checkSubmitted(uint256 domain, bytes32 txHash, uint256 logIndex) {
+    modifier checkSubmitted(uint256 domain, uint256 height, uint256 logIndex) {
         RestakingStatesStorage storage $ = _getRestakingStatesStorage();
-        (bool found, bytes32 hash) = _submitted(domain, txHash, logIndex);
+        (bool found, bytes32 hash) = _submitted(domain, height, logIndex);
         if (found) {
             revert ErrDuplicateSubmission();
         }
@@ -131,25 +146,25 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
         _;
     }
 
-    function _submitted(uint256 domain, bytes32 txHash, uint256 logIndex) internal view returns (bool, bytes32) {
+    function _submitted(uint256 domain, uint256 height, uint256 logIndex) internal view returns (bool, bytes32) {
         RestakingStatesStorage storage $ = _getRestakingStatesStorage();
-        bytes32 hash = keccak256(abi.encodePacked(txHash, logIndex));
+        bytes32 hash = keccak256(abi.encodePacked(height, logIndex));
         return ($.submitted[domain][hash], hash);
     }
 
-    function submitted(uint256 domain, bytes32 txHash, uint256 logIndex) public view override returns (bool found) {
-        (found,) = _submitted(domain, txHash, logIndex);
+    function submitted(uint256 domain, uint256 height, uint256 logIndex) public view override returns (bool found) {
+        (found,) = _submitted(domain, height, logIndex);
     }
 
     function deposit(
         uint256 domain,
-        bytes32 txHash,
+        uint256 height,
         uint256 logIndex,
         address rewarder,
         address account,
         address collateral,
         uint256 amount
-    ) external onlyRole(UPDATE_ROLE) checkSubmitted(domain, txHash, logIndex) {
+    ) external onlyRole(UPDATE_ROLE) checkSubmitted(domain, height, logIndex) {
         RestakingStatesStorage storage $ = _getRestakingStatesStorage();
         IRewarder(rewarder).update(account, domain, collateral);
         if (domain >= $.domains) {
@@ -168,13 +183,13 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
 
     function withdraw(
         uint256 domain,
-        bytes32 txHash,
+        uint256 height,
         uint256 logIndex,
         address rewarder,
         address account,
         address collateral,
         uint256 amount
-    ) external onlyRole(UPDATE_ROLE) checkSubmitted(domain, txHash, logIndex) {
+    ) external onlyRole(UPDATE_ROLE) checkSubmitted(domain, height, logIndex) {
         RestakingStatesStorage storage $ = _getRestakingStatesStorage();
         IRewarder(rewarder).update(account, domain, collateral);
         if (domain >= $.domains) {

@@ -25,13 +25,13 @@ contract RewarderStatesTest is RewarderBaseTest {
             address collateral = collaterals[_nextRng() % collaterals.length];
             if (_nextRng() % 2 == 0 && balances[domain][rewarder][account][collateral] > 0) {
                 uint256 amount = _nextRng() % balances[domain][rewarder][account][collateral] + 1;
-                restakingStates.withdraw(domain, bytes32(0), ops, rewarder, account, collateral, amount);
+                restakingStates.withdraw(domain, 0, ops, rewarder, account, collateral, amount);
                 balances[domain][rewarder][account][collateral] -= amount;
                 supply[domain][rewarder][collateral] -= amount;
             } else {
                 // [0, 100) with decimals
                 uint256 amount = _nextRng() % 1e20 / (10 ** (18 - decimals[collateral])) + 1;
-                restakingStates.deposit(domain, bytes32(0), ops, rewarder, account, collateral, amount);
+                restakingStates.deposit(domain, 0, ops, rewarder, account, collateral, amount);
                 balances[domain][rewarder][account][collateral] += amount;
                 supply[domain][rewarder][collateral] += amount;
             }
@@ -70,10 +70,10 @@ contract RewarderStatesTest is RewarderBaseTest {
 
     function test_updateRevertDuplicateSubmission() public {
         _initialRewarderStates();
-        restakingStates.deposit(0, bytes32(0), 0, rewarders[0], accounts[0], collaterals[0], 1);
+        restakingStates.deposit(0, 0, 0, rewarders[0], accounts[0], collaterals[0], 1);
         vm.expectRevert(IRestakingStates.ErrDuplicateSubmission.selector);
-        restakingStates.deposit(0, bytes32(0), 0, rewarders[0], accounts[0], collaterals[0], 1);
+        restakingStates.deposit(0, 0, 0, rewarders[0], accounts[0], collaterals[0], 1);
         vm.expectRevert(IRestakingStates.ErrDuplicateSubmission.selector);
-        restakingStates.withdraw(0, bytes32(0), 0, rewarders[0], accounts[0], collaterals[0], 1);
+        restakingStates.withdraw(0, 0, 0, rewarders[0], accounts[0], collaterals[0], 1);
     }
 }
