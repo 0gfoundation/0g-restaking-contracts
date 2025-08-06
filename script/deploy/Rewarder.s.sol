@@ -64,4 +64,13 @@ contract RewarderScript is Script, JsonUtils {
         vm.stopBroadcast();
         vm.writeJson(finalJson, path);
     }
+
+    function getRewarder(
+        bytes memory pubkey
+    ) public {
+        (string memory json,) = loadOrInitJson("rewarder");
+
+        RewarderFactory rewarderFactory = RewarderFactory(vm.parseJsonAddress(json, ".RewarderFactory"));
+        console2.log("rewarder: ", rewarderFactory.getRewarder(pubkey));
+    }
 }
