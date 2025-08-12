@@ -73,4 +73,16 @@ contract RewarderScript is Script, JsonUtils {
         RewarderFactory rewarderFactory = RewarderFactory(vm.parseJsonAddress(json, ".RewarderFactory"));
         console2.log("rewarder: ", rewarderFactory.getRewarder(pubkey));
     }
+    
+    function claim(
+        address rewarder,
+        address account
+    ) public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY_0G");
+
+        vm.startBroadcast(privKey);
+        uint reward = Rewarder(payable(rewarder)).claim(account);
+        console2.log("reward: ", reward);
+        vm.stopBroadcast();
+    }
 }

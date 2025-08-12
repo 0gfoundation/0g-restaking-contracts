@@ -96,7 +96,7 @@ contract DevScript is CoreScript, ZeroGravityScript {
             amount = 5 * 1e18;
         } else if (index == 2) {
             token = address(zgtoken);
-            amount = 64 * 1e18;
+            amount = 640 * 1e18;
         } else if (index == 3) {
             token = address(eth);
             amount = 5 * 1e18;

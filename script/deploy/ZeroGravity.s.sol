@@ -34,7 +34,7 @@ import {Token} from "../../test/mocks/Token.sol";
 import {JsonUtils} from "./Utils.s.sol";
 
 contract ZeroGravityScript is Script, JsonUtils {
-    uint48 public constant VAULT_EPOCH_DURATION = 2 weeks;
+    uint48 public constant VAULT_EPOCH_DURATION = 1 weeks;
     uint48 public constant VETO_DURATION = 1 days;
     uint48 public constant RESOLVER_SET_EPOCHS_DELAY = 1 days;
     uint48 public constant SLASHING_WINDOW = 1 weeks;
