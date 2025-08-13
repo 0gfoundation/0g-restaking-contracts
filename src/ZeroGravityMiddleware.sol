@@ -72,6 +72,14 @@ contract ZeroGravityMiddleware is
         $.network = p.network;
     }
 
+    function setSlashingWindow(
+        uint48 slashingWindow
+    ) external checkAccess {
+        assembly {
+            sstore(0x937e0d2984afc3afaa413d74098ba180cc0c6aae6527cc2713827ed6bc72f200, slashingWindow)
+        }
+    }
+
     function _registerOperatorImpl(address operator, bytes memory key, address vault) internal override {
         if (!_isOperatorRegistered(operator)) {
             _beforeRegisterOperator(operator, key, vault);

@@ -78,6 +78,12 @@ contract DevScript is CoreScript, ZeroGravityScript {
             cred = hex"01000000000000000000000020f33ce90a13a4b5e7697e3544c3083b8f8a51d5";
             sig =
                 hex"8de03cda5303275c16293f45479d88de709f865854c244cc784f549db536b6d9cdd96f5b4afe5e4a55bb05eea4ce6dcc00329550c3628fc9e8edb2b46bcf60c4b3cbc70065633b2c47bb5d8389d82a0e0cdf0424cbecd03e64936b371257cd81";
+        } else if (index == 4) {
+            pubkey =
+                hex"975d7a0569f6dd5560fa5054690d87f48fd99026f2336f9666f47d2c74a22611d1158d0ec3feb3511331ec4ef714f608";
+            cred = hex"01000000000000000000000063df5c411aa90b9866e7e6082230ffbf61aeda8c";
+            sig =
+                hex"8c8a84f5a14a36cee0729825d3bebb422885754bfc14112b336967b98b3a63e9042fa1cdd7df9b7c110db42e2f5a7a860dfd960513576af6c018074ea3e7d2234726f809ae623143ea256e24fbd26d42c33a5d33569a8b8050bd0355a38de954";
         }
     }
 
@@ -100,6 +106,9 @@ contract DevScript is CoreScript, ZeroGravityScript {
         } else if (index == 3) {
             token = address(eth);
             amount = 5 * 1e18;
+        } else if (index == 4) {
+            token = address(zgtoken);
+            amount = 32 * 1e18;
         }
     }
 

@@ -34,12 +34,9 @@ import {ZeroGravityOperator} from "../src/ZeroGravityOperator.sol";
 
 import {RewarderFactoryTest} from "./RewarderFactory.t.sol";
 
-contract ZeroGravityBaseTest is RewarderFactoryTest {
-    uint48 public constant VAULT_EPOCH_DURATION = 2 weeks;
-    uint48 public constant VETO_DURATION = 1 days;
-    uint48 public constant RESOLVER_SET_EPOCHS_DELAY = 1 days;
-    uint48 public constant SLASHING_WINDOW = 1 weeks;
+import {Constants} from "../script/deploy/Constants.s.sol";
 
+contract ZeroGravityBaseTest is RewarderFactoryTest, Constants {
     address private owner;
     address alice;
     uint256 alicePrivateKey;

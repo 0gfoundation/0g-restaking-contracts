@@ -32,13 +32,9 @@ import {ZeroGravityOperator} from "../../src/ZeroGravityOperator.sol";
 
 import {Token} from "../../test/mocks/Token.sol";
 import {JsonUtils} from "./Utils.s.sol";
+import {Constants} from "./Constants.s.sol";
 
-contract ZeroGravityScript is Script, JsonUtils {
-    uint48 public constant VAULT_EPOCH_DURATION = 1 weeks;
-    uint48 public constant VETO_DURATION = 1 days;
-    uint48 public constant RESOLVER_SET_EPOCHS_DELAY = 1 days;
-    uint48 public constant SLASHING_WINDOW = 1 weeks;
-
+contract ZeroGravityScript is Script, JsonUtils, Constants {
     function run(
         uint256 zgChainId
     ) public virtual {
@@ -134,5 +130,93 @@ contract ZeroGravityScript is Script, JsonUtils {
 
         vm.stopBroadcast();
         vm.writeJson(finalJson, path);
+    }
+
+    function getParams() external {
+        (string memory zjson,) = loadOrInitJson("zerogravity");
+        ZeroGravityFactory network = ZeroGravityFactory(vm.parseJsonAddress(zjson, ".ZeroGravityFactory"));
+        IZeroGravityFactory.InitParams memory p = network.getParams();
+        console2.log("network:");
+        console2.log("vaultConfigurator: ", p.vaultConfigurator);
+        console2.log("vaultVersion: ", p.vaultVersion);
+        console2.log("delegatorVersion: ", p.delegatorVersion);
+        console2.log("slasherVersion: ", p.slasherVersion);
+        console2.log("epochDuration: ", p.epochDuration);
+        console2.log("vetoDuration: ", p.vetoDuration);
+        console2.log("resolverSetEpochsDelay: ", p.resolverSetEpochsDelay);
+        console2.log("operatorRegistry: ", p.operatorRegistry);
+        console2.log("operatorBeacon: ", p.operatorBeacon);
+        console2.log("resolver: ", p.resolver);
+        console2.log("operatorVaultOptInService: ", p.operatorVaultOptInService);
+        console2.log("operatorNetworkOptInService: ", p.operatorNetworkOptInService);
+        console2.log("rewarderFactory: ", p.rewarderFactory);
+        console2.log("rewarderInitCodeHash: ");
+        console2.logBytes32(p.rewarderInitCodeHash);
+
+        BaseMiddlewareReader reader = BaseMiddlewareReader(vm.parseJsonAddress(zjson, ".ZeroGravityMiddleware"));
+        console2.log("");
+        console2.log("");
+        console2.log("middleware:");
+        console2.log("slashing window: ", reader.SLASHING_WINDOW());
+    }
+
+    function updateParams(
+        uint256 zgChainId
+    ) external {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+        address owner = vm.addr(privKey);
+
+        (string memory json,) = loadOrInitJson("symbiotic");
+        (string memory zjson,) = loadOrInitJson("zerogravity");
+        (string memory rjson,) = loadOrInitJsonWithChainId("rewarder", zgChainId);
+
+        address resolver = owner;
+
+        IZeroGravityFactory.InitParams memory params = IZeroGravityFactory.InitParams({
+            vaultConfigurator: vm.parseJsonAddress(json, ".VaultConfigurator"),
+            vaultVersion: 1,
+            delegatorVersion: uint64(vm.parseJsonUint(json, ".OperatorNetworkSpecificDelegatorType")),
+            slasherVersion: uint64(vm.parseJsonUint(json, ".VetoSlasherType")),
+            epochDuration: VAULT_EPOCH_DURATION,
+            vetoDuration: VETO_DURATION,
+            resolverSetEpochsDelay: RESOLVER_SET_EPOCHS_DELAY,
+            operatorRegistry: vm.parseJsonAddress(json, ".OperatorRegistry"),
+            operatorBeacon: vm.parseJsonAddress(zjson, ".OperatorBeacon"),
+            resolver: resolver,
+            operatorVaultOptInService: vm.parseJsonAddress(json, ".OperatorVaultOptInService"),
+            operatorNetworkOptInService: vm.parseJsonAddress(json, ".OperatorNetworkOptInService"),
+            rewarderFactory: vm.parseJsonAddress(rjson, ".RewarderFactory"),
+            rewarderInitCodeHash: vm.parseJsonBytes32(rjson, ".RewarderInitCodeHash")
+        });
+
+        vm.startBroadcast(privKey);
+
+        ZeroGravityFactory network = ZeroGravityFactory(vm.parseJsonAddress(zjson, ".ZeroGravityFactory"));
+        network.setParams(abi.encode(params));
+
+        ZeroGravityMiddleware middleware = ZeroGravityMiddleware(vm.parseJsonAddress(zjson, ".ZeroGravityMiddleware"));
+        middleware.setSlashingWindow(SLASHING_WINDOW);
+
+        vm.stopBroadcast();
+    }
+
+    function updateCollateral() external {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+
+        (string memory json,) = loadOrInitJson("zerogravity");
+        (string memory sjson,) = loadOrInitJson("symbiotic");
+
+        vm.startBroadcast(privKey);
+        // update collateral config
+        ZeroGravityFactory network = ZeroGravityFactory(vm.parseJsonAddress(json, ".ZeroGravityFactory"));
+        ZeroGravityMiddleware middleware = ZeroGravityMiddleware(vm.parseJsonAddress(json, ".ZeroGravityMiddleware"));
+        Token zgtoken = Token(vm.parseJsonAddress(sjson, ".ZG"));
+        Token eth = Token(vm.parseJsonAddress(sjson, ".ETH"));
+        network.updateCollateralConfig(address(zgtoken), 32 * 1e18);
+        middleware.setCollateralWeight(address(zgtoken), 1e9);
+        network.updateCollateralConfig(address(eth), 3.2 * 1e18);
+        middleware.setCollateralWeight(address(eth), 10 * 1e9);
+
+        vm.stopBroadcast();
     }
 }

@@ -17,6 +17,12 @@ contract ZeroGravityMiddlewareTest is ZeroGravityBaseTest {
         super.setUp();
     }
 
+    function testSetSlashingWindow() public {
+        assertEq(reader.SLASHING_WINDOW(), SLASHING_WINDOW);
+        middleware.setSlashingWindow(100);
+        assertEq(reader.SLASHING_WINDOW(), 100);
+    }
+
     function testSlash() public {
         // setup, create validator for alice & bob
         network.updateCollateralConfig(address(zgtoken), 16 * 1e18);

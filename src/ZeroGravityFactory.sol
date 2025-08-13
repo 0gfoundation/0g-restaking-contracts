@@ -85,6 +85,12 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         _grantRole(UPDATE_COLLATERAL_ROLE, msg.sender);
         _grantRole(PAUSER_ROLE, msg.sender);
 
+        _setParams(params);
+    }
+
+    function _setParams(
+        bytes memory params
+    ) internal {
         InitParams memory p;
         p = abi.decode(params, (InitParams));
 
@@ -105,13 +111,30 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         $.rewarderInitCodeHash = p.rewarderInitCodeHash;
     }
 
-    function setRewarderInfo(
-        address rewarderFactory,
-        bytes32 rewarderInitCodeHash
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function getParams() external view returns (InitParams memory params) {
         ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
-        $.rewarderFactory = rewarderFactory;
-        $.rewarderInitCodeHash = rewarderInitCodeHash;
+        params = InitParams({
+            vaultConfigurator: $.vaultConfigurator,
+            vaultVersion: $.vaultVersion,
+            delegatorVersion: $.delegatorVersion,
+            slasherVersion: $.slasherVersion,
+            epochDuration: $.epochDuration,
+            vetoDuration: $.vetoDuration,
+            resolverSetEpochsDelay: $.resolverSetEpochsDelay,
+            operatorRegistry: $.operatorRegistry,
+            operatorBeacon: $.operatorBeacon,
+            resolver: $.resolver,
+            operatorVaultOptInService: $.operatorVaultOptInService,
+            operatorNetworkOptInService: $.operatorNetworkOptInService,
+            rewarderFactory: $.rewarderFactory,
+            rewarderInitCodeHash: $.rewarderInitCodeHash
+        });
+    }
+
+    function setParams(
+        bytes memory params
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _setParams(params);
     }
 
     function registerNetwork(

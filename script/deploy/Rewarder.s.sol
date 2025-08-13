@@ -65,6 +65,25 @@ contract RewarderScript is Script, JsonUtils {
         vm.writeJson(finalJson, path);
     }
 
+    function grantUpdateRole(
+        address account
+    ) public {
+        (string memory json,) = loadOrInitJson("rewarder");
+        uint256 privKey = vm.envUint("PRIVATE_KEY_0G");
+
+        vm.startBroadcast(privKey);
+        RestakingStates states = RestakingStates(vm.parseJsonAddress(json, ".RestakingStates"));
+        states.grantRole(states.UPDATE_ROLE(), account);
+        vm.stopBroadcast();
+    }
+
+    function hash() public {
+        (string memory json,) = loadOrInitJson("rewarder");
+
+        RewarderFactory rewarderFactory = RewarderFactory(vm.parseJsonAddress(json, ".RewarderFactory"));
+        console2.logBytes32(rewarderFactory.rewarderInitCodeHash());
+    }
+
     function getRewarder(
         bytes memory pubkey
     ) public {
@@ -73,15 +92,12 @@ contract RewarderScript is Script, JsonUtils {
         RewarderFactory rewarderFactory = RewarderFactory(vm.parseJsonAddress(json, ".RewarderFactory"));
         console2.log("rewarder: ", rewarderFactory.getRewarder(pubkey));
     }
-    
-    function claim(
-        address rewarder,
-        address account
-    ) public {
+
+    function claim(address rewarder, address account) public {
         uint256 privKey = vm.envUint("PRIVATE_KEY_0G");
 
         vm.startBroadcast(privKey);
-        uint reward = Rewarder(payable(rewarder)).claim(account);
+        uint256 reward = Rewarder(payable(rewarder)).claim(account);
         console2.log("reward: ", reward);
         vm.stopBroadcast();
     }

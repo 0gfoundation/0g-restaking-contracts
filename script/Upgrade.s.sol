@@ -28,4 +28,20 @@ contract UpgradeScript is Script, JsonUtils {
 
         vm.stopBroadcast();
     }
+
+    function upgradeZeroGravityMiddleware() public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+
+        (string memory json, string memory path) = loadOrInitJson("zerogravity");
+
+        vm.startBroadcast(privKey);
+
+        UpgradeableBeacon networkBeacon = UpgradeableBeacon(vm.parseJsonAddress(json, ".ZeroGravityMiddlewareBeacon"));
+        ZeroGravityMiddleware impl = new ZeroGravityMiddleware();
+        networkBeacon.upgradeTo(address(impl));
+
+        vm.writeJson(vm.toString(address(impl)), path, ".ZeroGravityMiddlewareImpl");
+
+        vm.stopBroadcast();
+    }
 }
