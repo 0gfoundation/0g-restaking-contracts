@@ -13,6 +13,7 @@ deployments/**
 !deployments/zerogravity-17000.json
 !deployments/rewarder-16601.json
 !deployments/symbiotic-1.json
+!deployments/zerogravity-1.json
 
 # Docs
 docs/
