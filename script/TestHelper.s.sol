@@ -15,6 +15,7 @@ import {ZeroGravityOperator} from "../src/ZeroGravityOperator.sol";
 import {RewarderFactory} from "../src/RewarderFactory.sol";
 
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 import {Token} from "../test/mocks/Token.sol";
 
@@ -70,13 +71,32 @@ contract TestHelper is Script, JsonUtils {
 
         vm.startBroadcast(privKey);
 
-        uint256[] memory epochs = new uint256[](10);
-        for (uint256 i = 0; i < 10; ++i) {
+        uint256 epoch = IVault(vault).currentEpoch();
+
+        uint256[] memory epochs = new uint256[](epoch);
+        for (uint256 i = 0; i < epoch; ++i) {
             epochs[i] = i;
         }
 
         IVault(vault).claimBatch(owner, epochs);
 
         vm.stopBroadcast();
+    }
+
+    function status(
+        address vault
+    ) public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+        address owner = vm.addr(privKey);
+
+        (, string memory path) = loadOrInitJson("tests");
+
+        uint256 totalStaked = IVault(vault).activeBalanceOf(owner);
+
+        vm.writeJson(
+            vm.toString(totalStaked),
+            path,
+            string.concat(".", Strings.toHexString(owner), ".", Strings.toHexString(vault))
+        );
     }
 }
