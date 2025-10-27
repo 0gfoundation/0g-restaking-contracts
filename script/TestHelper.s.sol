@@ -57,7 +57,7 @@ contract TestHelper is Script, JsonUtils {
         if (totalStaked > 0) {
             vm.startBroadcast(privKey);
 
-            IVault(vault).withdraw(owner, totalStaked / 2);
+            IVault(vault).withdraw(owner, totalStaked);
 
             vm.stopBroadcast();
         }

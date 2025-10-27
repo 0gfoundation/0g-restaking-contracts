@@ -14,12 +14,12 @@ for key in $keys; do
 
 done
 
-forge verify-contract $BaseMiddlewareReader BaseMiddlewareReader --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL
-forge verify-contract $OperatorBeacon UpgradeableBeacon --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL
-forge verify-contract $OperatorImpl ZeroGravityOperator --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL
-forge verify-contract $ZeroGravityFactory BeaconProxy --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL
-forge verify-contract $ZeroGravityFactoryBeacon UpgradeableBeacon --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL
-forge verify-contract $ZeroGravityFactoryImpl ZeroGravityFactory --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL
-forge verify-contract $ZeroGravityMiddleware BeaconProxy --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL
-forge verify-contract $ZeroGravityMiddlewareBeacon UpgradeableBeacon --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL
-forge verify-contract $ZeroGravityMiddlewareImpl ZeroGravityMiddleware --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL
+forge verify-contract $BaseMiddlewareReader BaseMiddlewareReader --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID --verifier-api-version v2
+forge verify-contract $OperatorBeacon UpgradeableBeacon --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID --verifier-api-version v2
+forge verify-contract $OperatorImpl ZeroGravityOperator --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID --verifier-api-version v2
+forge verify-contract $ZeroGravityFactory BeaconProxy --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID --verifier-api-version v2
+forge verify-contract $ZeroGravityFactoryBeacon UpgradeableBeacon --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID --verifier-api-version v2
+forge verify-contract $ZeroGravityFactoryImpl ZeroGravityFactory --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID --verifier-api-version v2
+forge verify-contract $ZeroGravityMiddleware BeaconProxy --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID --verifier-api-version v2
+forge verify-contract $ZeroGravityMiddlewareBeacon UpgradeableBeacon --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID --verifier-api-version v2
+forge verify-contract $ZeroGravityMiddlewareImpl ZeroGravityMiddleware --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID --verifier-api-version v2

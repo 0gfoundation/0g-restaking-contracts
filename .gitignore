@@ -16,6 +16,8 @@ deployments/**
 !deployments/rewarder-16661.json
 !deployments/symbiotic-1.json
 !deployments/zerogravity-1.json
+!deployments/symbiotic-11155111.json
+!deployments/zerogravity-11155111.json
 
 # Docs
 docs/
@@ -36,3 +38,8 @@ upgrade.sh
 deposit.sh
 register.sh
 withdraw.sh
+claim.sh
+rewarder.sh
+auto_test.py
+withdraw.py
+dummy_accounts.txt

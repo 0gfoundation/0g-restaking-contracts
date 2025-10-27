@@ -86,11 +86,39 @@ contract RewarderScript is Script, JsonUtils {
 
     function getRewarder(
         bytes memory pubkey
-    ) public {
+    ) public returns (address) {
         (string memory json,) = loadOrInitJson("rewarder");
 
         RewarderFactory rewarderFactory = RewarderFactory(vm.parseJsonAddress(json, ".RewarderFactory"));
-        console2.log("rewarder: ", rewarderFactory.getRewarder(pubkey));
+        address rewarder = rewarderFactory.getRewarder(pubkey);
+        console2.log("rewarder: ", rewarder);
+        return rewarder;
+    }
+
+    function show() public {
+        bytes[] memory pubkeys = new bytes[](4);
+        pubkeys[0] =
+            hex"872e648c3b12a24a2a85b539dc669e722f2463ef8ed67304551db381e313f78ebf879d9835d57617f64e8d50658fdf1e";
+        pubkeys[1] =
+            hex"b0d6091bc5d40ed082900c87a93ff45bda1d5494c028bc1632365b22a373dcf691b7f75642c0dbfeafcda052f259d768";
+        pubkeys[2] =
+            hex"a8a9672bc571aae5f454bcc8d59a45a844194811b3e44d8cef94ea967653ce7d0b93914a8c2dfef5f15f146ea8923c1e";
+        pubkeys[3] =
+            hex"973191a914e10526cf374397edb4a0f8b5749ae13759fae02c3fde989c09ac7b8d7ac453590935abb09da12e19596598";
+
+        (string memory json,) = loadOrInitJson("rewarder");
+        for (uint256 j = 0; j < pubkeys.length; ++j) {
+            address rewarder = getRewarder(pubkeys[j]);
+            RestakingStates states = RestakingStates(vm.parseJsonAddress(json, ".RestakingStates"));
+            (uint256 power, RestakingStates.Power[] memory powers) = states.getPowers(rewarder);
+            console2.log("total power of ", rewarder, " is ", power);
+            for (uint256 i = 0; i < powers.length; ++i) {
+                if (powers[i].power == 0) {
+                    continue;
+                }
+                console2.log("power of ", powers[i].supply.collateral, " is ", powers[i].power);
+            }
+        }
     }
 
     function claim(address rewarder, address account) public {
