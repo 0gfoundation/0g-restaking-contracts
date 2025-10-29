@@ -67,9 +67,9 @@ contract ZeroGravityScript is Script, JsonUtils, Constants {
             vaultVersion: 1,
             delegatorVersion: uint64(vm.parseJsonUint(json, ".OperatorNetworkSpecificDelegatorType")),
             slasherVersion: uint64(vm.parseJsonUint(json, ".VetoSlasherType")),
-            epochDuration: VAULT_EPOCH_DURATION,
-            vetoDuration: VETO_DURATION,
-            resolverSetEpochsDelay: RESOLVER_SET_EPOCHS_DELAY,
+            epochDuration: VAULT_EPOCH_DURATION(),
+            vetoDuration: VETO_DURATION(),
+            resolverSetEpochsDelay: RESOLVER_SET_EPOCHS_DELAY(),
             operatorRegistry: vm.parseJsonAddress(json, ".OperatorRegistry"),
             operatorBeacon: address(operatorBeacon),
             resolver: resolver,
@@ -98,7 +98,7 @@ contract ZeroGravityScript is Script, JsonUtils, Constants {
 
         IZeroGravityMiddleware.InitParams memory middlewareInitParams = IZeroGravityMiddleware.InitParams({
             network: address(network),
-            slashingWindow: SLASHING_WINDOW,
+            slashingWindow: SLASHING_WINDOW(),
             vaultRegistry: vm.parseJsonAddress(json, ".VaultFactory"),
             operatorRegistry: vm.parseJsonAddress(json, ".OperatorRegistry"),
             operatorNetOptin: vm.parseJsonAddress(json, ".OperatorNetworkOptInService"),
@@ -177,9 +177,9 @@ contract ZeroGravityScript is Script, JsonUtils, Constants {
             vaultVersion: 1,
             delegatorVersion: uint64(vm.parseJsonUint(json, ".OperatorNetworkSpecificDelegatorType")),
             slasherVersion: uint64(vm.parseJsonUint(json, ".VetoSlasherType")),
-            epochDuration: VAULT_EPOCH_DURATION,
-            vetoDuration: VETO_DURATION,
-            resolverSetEpochsDelay: RESOLVER_SET_EPOCHS_DELAY,
+            epochDuration: VAULT_EPOCH_DURATION(),
+            vetoDuration: VETO_DURATION(),
+            resolverSetEpochsDelay: RESOLVER_SET_EPOCHS_DELAY(),
             operatorRegistry: vm.parseJsonAddress(json, ".OperatorRegistry"),
             operatorBeacon: vm.parseJsonAddress(zjson, ".OperatorBeacon"),
             resolver: resolver,
@@ -195,7 +195,7 @@ contract ZeroGravityScript is Script, JsonUtils, Constants {
         network.setParams(abi.encode(params));
 
         ZeroGravityMiddleware middleware = ZeroGravityMiddleware(vm.parseJsonAddress(zjson, ".ZeroGravityMiddleware"));
-        middleware.setSlashingWindow(SLASHING_WINDOW);
+        middleware.setSlashingWindow(SLASHING_WINDOW());
 
         vm.stopBroadcast();
     }

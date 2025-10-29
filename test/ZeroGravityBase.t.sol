@@ -87,9 +87,9 @@ contract ZeroGravityBaseTest is RewarderFactoryTest, Constants {
             vaultVersion: 1,
             delegatorVersion: operatorNetworkSpecificDelegatorType,
             slasherVersion: vetoSlasherType,
-            epochDuration: VAULT_EPOCH_DURATION,
-            vetoDuration: VETO_DURATION,
-            resolverSetEpochsDelay: RESOLVER_SET_EPOCHS_DELAY,
+            epochDuration: VAULT_EPOCH_DURATION(),
+            vetoDuration: VETO_DURATION(),
+            resolverSetEpochsDelay: RESOLVER_SET_EPOCHS_DELAY(),
             operatorRegistry: address(operatorRegistry),
             operatorBeacon: address(operatorBeacon),
             resolver: resolver,
@@ -103,7 +103,7 @@ contract ZeroGravityBaseTest is RewarderFactoryTest, Constants {
     function _middlewareInitParams() internal view returns (IZeroGravityMiddleware.InitParams memory) {
         return IZeroGravityMiddleware.InitParams({
             network: address(network),
-            slashingWindow: SLASHING_WINDOW,
+            slashingWindow: SLASHING_WINDOW(),
             vaultRegistry: address(vaultFactory),
             operatorRegistry: address(operatorRegistry),
             operatorNetOptin: address(operatorNetworkOptInService),

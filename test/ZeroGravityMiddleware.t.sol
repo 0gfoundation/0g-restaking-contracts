@@ -18,7 +18,7 @@ contract ZeroGravityMiddlewareTest is ZeroGravityBaseTest {
     }
 
     function testSetSlashingWindow() public {
-        assertEq(reader.SLASHING_WINDOW(), SLASHING_WINDOW);
+        assertEq(reader.SLASHING_WINDOW(), SLASHING_WINDOW());
         middleware.setSlashingWindow(100);
         assertEq(reader.SLASHING_WINDOW(), 100);
     }
@@ -72,7 +72,7 @@ contract ZeroGravityMiddlewareTest is ZeroGravityBaseTest {
         bytes[] memory slashHints = new bytes[](2);
         bytes[] memory weightHints = new bytes[](2);
         middleware.slash(uint48(block.timestamp - 5), aliceKey, 18 * 1e18, stakeHints, slashHints, weightHints);
-        vm.warp(block.timestamp + VETO_DURATION + 1);
+        vm.warp(block.timestamp + VETO_DURATION() + 1);
         // slash
         uint256[] memory indexes = new uint256[](2);
         bytes[] memory hints = new bytes[](2);
