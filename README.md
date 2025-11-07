@@ -1,65 +1,54 @@
-## Foundry
+# 0g-restaking-contracts
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+**0g-restaking-contracts** is part of the **restaking module** for the 0G Chain.  
+It is **built on top of the [Symbiotic](https://symbiotic.fi/) protocol**, with the goal of enabling validators to restake their assets in Symbiotic and participate in 0G Chain consensus.  
+This design aims to facilitate future scaling and decentralization of the 0G network.
 
-Foundry consists of:
+## Overview
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+The repository consists of **two main components**:
 
-## Documentation
+### 1. Ethereum-side Integration Module
+This module handles the integration between **0G** and the **Symbiotic protocol**.  
+It includes:
+- `ZeroGravityFactory`
+- `ZeroGravityMiddleware`
+- `ZeroGravityOperator`
+- `WeightedStakePower`
 
-https://book.getfoundry.sh/
+These contracts are **deployed on Ethereum**, enabling 0G validators to restake via Symbiotic.
 
-## Usage
+### 2. 0G Chain Reward Distribution Module
+This module is responsible for **distributing block rewards** corresponding to the **restaking portion** of the 0G Chain consensus.  
+It includes:
+- `RestakingStates`
+- `RewarderFactory`
+- `Rewarder`
+It is **deployed on the 0G Chain**. 
 
-### Build
+## Restaking Flow
 
-```shell
-$ forge build
+```mermaid
+flowchart TD
+    subgraph ETH[Ethereum]
+        V[Validator creates a Symbiotic Vault<br/>via ZeroGravityFactory]
+        U[User stakes into a validator’s vault]
+        V2[Validator's Vault on Symbiotic]
+    end
+
+    subgraph OG[0G Chain]
+        O2[Oracle syncs Ethereum restaking states<br/>to RestakingStates contract]
+        O[Oracle create Rewarder contracts for restaking validators]
+        C[0G consensus listens to Ethereum events<br/>and tracks validator balance changes]
+        B[Validators produce blocks and earn rewards]
+        R[Rewards distributed to corresponding<br/>restaking rewarder contracts]
+        W[Users withdraw rewards from<br/>their restaking rewarder contract]
+    end
+
+    %% sequential flow
+    V --> V2
+    U --> V2
+    V2 --> O --> O2 --> R
+    V2 --> C --> B --> R --> W
 ```
 
-### Test
-
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
