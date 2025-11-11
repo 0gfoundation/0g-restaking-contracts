@@ -22,7 +22,8 @@ It includes:
 - `RestakingStates`: Maintain the state of restaking-related vaults and other contracts on Ethereum, that are synchronized to the 0G chain by off-chain Oracle. 
 - `RewarderFactory`: Deployer of rewarder contracts.
 - `Rewarder`: Reward distribution of specific restaking validator.
-It is **deployed on the 0G Chain**. 
+
+These contracts are **deployed on the 0G Chain**. 
 
 ## Restaking Flow
 
