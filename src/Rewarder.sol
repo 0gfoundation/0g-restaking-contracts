@@ -51,6 +51,7 @@ contract Rewarder is IRewarder, ReentrancyGuardUpgradeable {
         }
         (uint256 totalPower, IRestakingStates.Power[] memory powers) =
             IRestakingStates($.restakingStates).getPowers(address(this));
+        uint256 distributed = 0;
         if (totalPower > 0) {
             for (uint256 i = 0; i < powers.length; ++i) {
                 if (powers[i].power == 0) {
@@ -59,9 +60,10 @@ contract Rewarder is IRewarder, ReentrancyGuardUpgradeable {
                 uint256 reward = pendingReward * powers[i].power / totalPower;
                 $.accRewardPerShare[powers[i].supply.domain][powers[i].supply.collateral] +=
                     reward * 1e18 / powers[i].supply.amount;
+                distributed += reward;
             }
         }
-        $.totalUnclaimedRewards += pendingReward;
+        $.totalUnclaimedRewards += distributed;
     }
 
     function _update(
