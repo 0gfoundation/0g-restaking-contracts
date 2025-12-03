@@ -103,6 +103,11 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         assertEq(eth.balanceOf(address(middleware)), 0);
     }
 
+    function test_CreateValidatorByAdmin() public {
+        network.updateCollateralConfig(address(zgtoken), 32 * 1e18);
+        network.createValidator(new bytes(48), new bytes(32), new bytes(96), address(this), address(zgtoken), 0);
+    }
+
     function test_CreateValidatorRevertInvalidCollateral() public {
         address val = makeAddr("validator#0");
         _topUpTokens(val);
