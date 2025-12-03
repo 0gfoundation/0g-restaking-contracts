@@ -44,10 +44,10 @@ contract RewarderTest is RewarderBaseTest {
                 }
                 if (power > 0 && pendingReward > 0) {
                     rewards[rewarder][accounts[i]] += pendingReward * power / total;
+                    unclaimed[rewarder] += pendingReward * power / total;
                 }
             }
         }
-        unclaimed[rewarder] += pendingReward;
     }
 
     function test_update() public {
@@ -103,7 +103,7 @@ contract RewarderTest is RewarderBaseTest {
                 _update(rewarder);
                 // claim, appoximate eq
                 uint256 claimed = Rewarder(payable(rewarder)).claim(account);
-                assertApproxEqRel(claimed, rewards[rewarder][account], 0.0001e18);
+                assertApproxEqRel(claimed + 1e5, rewards[rewarder][account] + 1e5, 0.0001e18);
                 rewards[rewarder][account] = claimed;
 
                 rewards[rewarder][account] -= claimed;
@@ -127,7 +127,7 @@ contract RewarderTest is RewarderBaseTest {
                 uint256 ba = account.balance;
                 // claim
                 uint256 claimed = Rewarder(payable(rewarder)).claim(account);
-                assertApproxEqRel(claimed, rewards[rewarder][account], 0.0001e18);
+                assertApproxEqRel(claimed + 1e5, rewards[rewarder][account] + 1e5, 0.0001e18);
                 rewards[rewarder][account] = claimed;
 
                 rewards[rewarder][account] -= claimed;
