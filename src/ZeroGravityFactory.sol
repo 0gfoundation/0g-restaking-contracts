@@ -207,13 +207,18 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         if (!$.minValidatorDeposit.contains(collateral)) {
             revert InvalidCollateral();
         } else {
-            uint256 minDeposit = $.minValidatorDeposit.get(collateral);
-            if (minDeposit == 0 || amount < minDeposit) {
-                revert InsufficientCollateral();
+            // check amount, or sender is admin
+            if (!hasRole(DEFAULT_ADMIN_ROLE, msg.sender)) {
+                uint256 minDeposit = $.minValidatorDeposit.get(collateral);
+                if (minDeposit == 0 || amount < minDeposit) {
+                    revert InsufficientCollateral();
+                }
             }
-            uint256 balanceBefore = IERC20(collateral).balanceOf(address(this));
-            IERC20(collateral).safeTransferFrom(msg.sender, address(this), amount);
-            amount = IERC20(collateral).balanceOf(address(this)) - balanceBefore;
+            if (amount > 0) {
+                uint256 balanceBefore = IERC20(collateral).balanceOf(address(this));
+                IERC20(collateral).safeTransferFrom(msg.sender, address(this), amount);
+                amount = IERC20(collateral).balanceOf(address(this)) - balanceBefore;
+            }
         }
         // calculate rewarder
         address rewarder =
@@ -285,7 +290,9 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         emit ValidatorCreated(pubkey, credentials, signature, collateral, rewarder, vault, operator);
 
         // deposit on behalf of sender
-        IERC20(collateral).approve(vault, amount);
-        IVault(vault).deposit(onBehalfOf, amount);
+        if (amount > 0) {
+            IERC20(collateral).approve(vault, amount);
+            IVault(vault).deposit(onBehalfOf, amount);
+        }
     }
 }

@@ -9,6 +9,7 @@ import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/Upgradeabl
 import {ZeroGravityFactory} from "../src/ZeroGravityFactory.sol";
 import {ZeroGravityMiddleware} from "../src/ZeroGravityMiddleware.sol";
 import {ZeroGravityOperator} from "../src/ZeroGravityOperator.sol";
+import {Rewarder} from "../src/Rewarder.sol";
 
 import {JsonUtils} from "./deploy/Utils.s.sol";
 
@@ -41,6 +42,22 @@ contract UpgradeScript is Script, JsonUtils {
         networkBeacon.upgradeTo(address(impl));
 
         vm.writeJson(vm.toString(address(impl)), path, ".ZeroGravityMiddlewareImpl");
+
+        vm.stopBroadcast();
+    }
+
+    function upgradeRewarder() public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+
+        (string memory json, string memory path) = loadOrInitJson("rewarder");
+
+        vm.startBroadcast(privKey);
+
+        UpgradeableBeacon rewarderBeacon = UpgradeableBeacon(vm.parseJsonAddress(json, ".RewarderBeacon"));
+        Rewarder impl = new Rewarder();
+        rewarderBeacon.upgradeTo(address(impl));
+
+        vm.writeJson(vm.toString(address(impl)), path, ".RewarderImpl");
 
         vm.stopBroadcast();
     }

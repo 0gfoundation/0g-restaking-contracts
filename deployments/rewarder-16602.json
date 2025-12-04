@@ -6,6 +6,6 @@
   "RewarderFactory": "0x56563413ccA3FB2dC8354bE3fB2aA9dee106D1E5",
   "RewarderFactoryBeacon": "0x3A7E357602FD8128Ad11eF950C21f281a0B201F5",
   "RewarderFactoryImpl": "0x22f70CDA82Fc134F244Ee0fe8703c98AAA633436",
-  "RewarderImpl": "0x2414a6CedB52B1A7084433691428612B8799588e",
+  "RewarderImpl": "0x8eBFFF8504e57e9424d40060fb58fD2c1eff110b",
   "RewarderInitCodeHash": "0xfe10e8d8786dae08fc568f6009ee6da67b625402a4340af9dd1b95cd95ce583d"
 }

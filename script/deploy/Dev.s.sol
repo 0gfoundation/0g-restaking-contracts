@@ -100,6 +100,12 @@ contract DevScript is CoreScript, ZeroGravityScript {
             cred = hex"0100000000000000000000008936421339b144259187e7ecbe185771bfc1bbd4";
             sig =
                 hex"96f1b9d6c06cbe883887a6994b1e3b722cd1cd53dddf0e63a63c25bdc3112f02a85fb0560876b9e9d88670c74d639db904bf466894ef2ccfa2fcd5f936094a71a518e715a9d9c856d843340a1877d6f6f47b6e70d8bdcac7c561491d184c76bb";
+        } else if (index == 8) {
+            pubkey =
+                hex"872e648c3b12a24a2a85b539dc669e722f2463ef8ed67304551db381e313f78ebf879d9835d57617f64e8d50658fdf1e";
+            cred = hex"01000000000000000000000008fc637a7802c1210cc071c2dc65bcad26badbdf";
+            sig =
+                hex"943c3dce0efaaed0b64e6e4f67d85d7d6d7c2c4401ca39b9a109ee66294e7679431a87eaa63a02ec3ea6a54cd7dcdb430e11dc5e053bbb3d669199260f82559dd9231d41c71374bcd249890d5fff22be54cd8b0a1b84a25bfe2264ab690f47bf";
         }
     }
 
@@ -109,6 +115,7 @@ contract DevScript is CoreScript, ZeroGravityScript {
         (string memory sjson,) = loadOrInitJson("symbiotic");
         Token zgtoken = Token(vm.parseJsonAddress(sjson, ".ZG"));
         Token eth = Token(vm.parseJsonAddress(sjson, ".ETH"));
+        Token mellowOFT = Token(vm.parseJsonAddress(sjson, ".MellowOFT"));
         (pubkey, cred, sig) = _validatorInfo(index);
         if (index == 0) {
             token = address(zgtoken);
@@ -134,6 +141,9 @@ contract DevScript is CoreScript, ZeroGravityScript {
         } else if (index == 7) {
             token = address(eth);
             amount = 32 * 1e17;
+        } else if (index == 8) {
+            token = address(mellowOFT);
+            amount = 0;
         }
     }
 
