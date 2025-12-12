@@ -17,6 +17,7 @@ deployments/**
 !deployments/zerogravity-1.json
 !deployments/symbiotic-11155111.json
 !deployments/zerogravity-11155111.json
+!deployments/ascend-16602.json
 
 # Docs
 docs/
@@ -42,3 +43,4 @@ rewarder.sh
 auto_test.py
 withdraw.py
 dummy_accounts.txt
+ascend.sh
