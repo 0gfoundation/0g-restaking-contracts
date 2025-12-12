@@ -15,7 +15,17 @@ contract JsonUtils is Script {
         string memory task,
         uint256 chainId
     ) internal returns (string memory json, string memory path) {
-        path = string.concat(vm.projectRoot(), "/deployments/", string.concat(task, "-", vm.toString(chainId)), ".json");
+        // Check if DEPLOYMENT_PATH environment variable is set
+        string memory deploymentPathEnv = vm.envOr("DEPLOYMENT_PATH", string(""));
+        if (bytes(deploymentPathEnv).length > 0) {
+            // Use DEPLOYMENT_PATH if it's set
+            path = string.concat(deploymentPathEnv, "/", string.concat(task, "-", vm.toString(chainId)), ".json");
+        } else {
+            // Use default path if DEPLOYMENT_PATH is not set
+            path = string.concat(
+                vm.projectRoot(), "/deployments/", string.concat(task, "-", vm.toString(chainId)), ".json"
+            );
+        }
 
         try vm.readFile(path) returns (string memory content) {
             json = content;
