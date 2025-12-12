@@ -28,7 +28,6 @@ contract DevScript is CoreScript, ZeroGravityScript {
         // CoreScript.run();
         ZeroGravityScript.run(zgChainId);
 
-        /*
         uint256 privKey = vm.envUint("PRIVATE_KEY");
 
         (string memory json,) = loadOrInitJson("zerogravity");
@@ -46,7 +45,6 @@ contract DevScript is CoreScript, ZeroGravityScript {
         middleware.setCollateralWeight(address(eth), 10 * 1e9);
 
         vm.stopBroadcast();
-        */
     }
 
     function _validatorInfo(
