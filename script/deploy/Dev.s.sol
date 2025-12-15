@@ -145,6 +145,65 @@ contract DevScript is CoreScript, ZeroGravityScript {
         }
     }
 
+    function createValidator(
+        bytes memory pubkey,
+        bytes memory cred,
+        bytes memory sig,
+        address owner,
+        address token,
+        uint256 amount
+    ) public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+        vm.startBroadcast(privKey);
+
+        address owner = vm.addr(privKey);
+        (string memory json,) = loadOrInitJson("zerogravity");
+        ZeroGravityFactory network = ZeroGravityFactory(vm.parseJsonAddress(json, ".ZeroGravityFactory"));
+        // approve token to network
+        IERC20(token).approve(address(network), type(uint256).max);
+        network.createValidator(pubkey, cred, sig, owner, token, amount);
+        vm.stopBroadcast();
+    }
+
+    function deposit(bytes memory pubkey, address token, uint256 amount) public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+        vm.startBroadcast(privKey);
+        (string memory json,) = loadOrInitJson("zerogravity");
+        ZeroGravityMiddleware middleware = ZeroGravityMiddleware(vm.parseJsonAddress(json, ".ZeroGravityMiddleware"));
+
+        address owner = vm.addr(privKey);
+        address operator = middleware.operatorByKey(pubkey);
+        BaseMiddlewareReader reader = BaseMiddlewareReader(vm.parseJsonAddress(json, ".ZeroGravityMiddleware"));
+        address[] memory vaults = reader.activeOperatorVaults(operator);
+        for (uint256 i = 0; i < vaults.length; ++i) {
+            if (IVault(vaults[i]).collateral() == token) {
+                IERC20(token).approve(vaults[i], amount);
+                IVault(vaults[i]).deposit(owner, amount);
+            }
+        }
+
+        vm.stopBroadcast();
+    }
+
+    function withdraw(bytes memory pubkey, address token, uint256 amount) public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+        vm.startBroadcast(privKey);
+        (string memory json,) = loadOrInitJson("zerogravity");
+        ZeroGravityMiddleware middleware = ZeroGravityMiddleware(vm.parseJsonAddress(json, ".ZeroGravityMiddleware"));
+
+        address owner = vm.addr(privKey);
+        address operator = middleware.operatorByKey(pubkey);
+        BaseMiddlewareReader reader = BaseMiddlewareReader(vm.parseJsonAddress(json, ".ZeroGravityMiddleware"));
+        address[] memory vaults = reader.activeOperatorVaults(operator);
+        for (uint256 i = 0; i < vaults.length; ++i) {
+            if (IVault(vaults[i]).collateral() == token) {
+                IVault(vaults[i]).withdraw(owner, amount);
+            }
+        }
+
+        vm.stopBroadcast();
+    }
+
     function register(
         uint256 index
     ) public {
