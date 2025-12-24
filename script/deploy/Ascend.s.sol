@@ -65,6 +65,29 @@ contract AscendRouterScript is Script, JsonUtils {
         vm.stopBroadcast();
     }
 
+    function distribute() public virtual {
+        uint256 privKey = vm.envUint("PRIVATE_KEY_0G");
+
+        string memory obj = "ascend";
+
+        (string memory json,) = loadOrInitJson(obj);
+
+        // Read AscendRouter address from JSON file
+        address ascendRouterAddress = vm.parseJsonAddress(json, ".AscendRouter");
+        require(ascendRouterAddress != address(0), "AscendRouter address not found in JSON file");
+
+        vm.startBroadcast(privKey);
+
+        if (ascendRouterAddress.balance > 0) {
+            // Call distribute method
+            AscendRouter(payable(ascendRouterAddress)).distribute();
+        }
+
+        console2.log("AscendRouter distributed successfully");
+
+        vm.stopBroadcast();
+    }
+
     function updateParams() public virtual {
         uint256 privKey = vm.envUint("PRIVATE_KEY_0G");
 
