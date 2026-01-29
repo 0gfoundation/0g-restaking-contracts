@@ -275,6 +275,29 @@ contract DevScript is CoreScript, ZeroGravityScript {
         }
     }
 
+    function checkVault(bytes memory pubkey, address collateral, uint256 staked) public {
+        (string memory json,) = loadOrInitJson("zerogravity");
+
+        ZeroGravityMiddleware middleware = ZeroGravityMiddleware(vm.parseJsonAddress(json, ".ZeroGravityMiddleware"));
+        address operator = middleware.operatorByKey(pubkey);
+        BaseMiddlewareReader reader = BaseMiddlewareReader(vm.parseJsonAddress(json, ".ZeroGravityMiddleware"));
+        address[] memory vaults = reader.activeOperatorVaults(operator);
+        for (uint256 i = 0; i < vaults.length; ++i) {
+            if (IVault(vaults[i]).collateral() == collateral) {
+                uint256 balance = IERC20(collateral).balanceOf(vaults[i]);
+                require(
+                    balance >= staked,
+                    string.concat(
+                        "balance < staked amount: balance=", vm.toString(balance), ", staked=", vm.toString(staked)
+                    )
+                );
+                console2.log("0g staked: ", staked, ", vault balance: ", balance);
+                return;
+            }
+        }
+        revert("vault not found");
+    }
+
     function createRewarder(
         uint256 index
     ) public {

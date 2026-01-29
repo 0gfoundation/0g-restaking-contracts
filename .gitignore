@@ -44,3 +44,4 @@ auto_test.py
 withdraw.py
 dummy_accounts.txt
 ascend.sh
+checkVault.sh
