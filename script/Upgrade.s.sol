@@ -10,6 +10,7 @@ import {ZeroGravityFactory} from "../src/ZeroGravityFactory.sol";
 import {ZeroGravityMiddleware} from "../src/ZeroGravityMiddleware.sol";
 import {ZeroGravityOperator} from "../src/ZeroGravityOperator.sol";
 import {Rewarder} from "../src/Rewarder.sol";
+import {RestakingStates} from "../src/RestakingStates.sol";
 
 import {JsonUtils} from "./deploy/Utils.s.sol";
 
@@ -58,6 +59,22 @@ contract UpgradeScript is Script, JsonUtils {
         rewarderBeacon.upgradeTo(address(impl));
 
         vm.writeJson(vm.toString(address(impl)), path, ".RewarderImpl");
+
+        vm.stopBroadcast();
+    }
+
+    function upgradeRestakingStates() public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+
+        (string memory json, string memory path) = loadOrInitJson("rewarder");
+
+        vm.startBroadcast(privKey);
+
+        UpgradeableBeacon restakingStatesBeacon = UpgradeableBeacon(vm.parseJsonAddress(json, ".RestakingStatesBeacon"));
+        RestakingStates impl = new RestakingStates();
+        restakingStatesBeacon.upgradeTo(address(impl));
+
+        vm.writeJson(vm.toString(address(impl)), path, ".RestakingStatesImpl");
 
         vm.stopBroadcast();
     }

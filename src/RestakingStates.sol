@@ -143,6 +143,7 @@ contract RestakingStates is IRestakingStates, AccessControlUpgradeable {
             revert ErrDuplicateSubmission();
         }
         $.submitted[domain][hash] = true;
+        emit Submitted(domain, height, logIndex);
         _;
     }
 

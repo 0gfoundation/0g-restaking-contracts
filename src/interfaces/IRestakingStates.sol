@@ -9,6 +9,7 @@ interface IRestakingStates {
 
     event WeightUpdated(uint256 domain, address collateral, uint256 weight, uint256 height);
     event BalanceUpdated(uint256 domain, address rewarder, address account, address collateral, uint256 amount);
+    event Submitted(uint256 domain, uint256 height, uint256 logIndex);
 
     struct Balance {
         uint256 domain;
