@@ -1,0 +1,12 @@
+{
+  "AscendRouter": "0x4af366C80Eb17F24923fE956Cc21A11A6864B33a",
+  "AscendRouterBeacon": "0x5e124CeD7dDF75D8ae246cD33a5E7bCfC0f4D157",
+  "AscendRouterImpl": "0x279f4A20caC9E81848aeaE3363a1A7e29D3C859e",
+  "Foundation": "0x0000000000000000000000000000000000000000",
+  "FoundationPercentage": 0,
+  "MellowVault": "0xc873201A5963a86e3C7b9ea6a69cea4c45025067",
+  "MellowVaultPercentage": 1000000000000000000,
+  "PaymentLayer": "0x0000000000000000000000000000000000000000",
+  "PaymentLayerPercentage": 0,
+  "WETH": "0x1Cd0690fF9a693f5EF2dD976660a8dAFc81A109c"
+}

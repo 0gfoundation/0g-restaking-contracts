@@ -18,6 +18,7 @@ deployments/**
 !deployments/symbiotic-11155111.json
 !deployments/zerogravity-11155111.json
 !deployments/ascend-16602.json
+!deployments/ascend-16661.json
 
 # Docs
 docs/
