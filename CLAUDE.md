@@ -73,6 +73,18 @@ Multiple 0G Chains with distinct chain IDs can share a single Ethereum-side rest
 2. **Reward Distribution**: Oracle syncs Ethereum state → RestakingStates → RewarderFactory creates Rewarder → block rewards accumulated → users claim via `Rewarder.claim()`
 3. **Slashing**: `Middleware.slash()` with proof hints → proportional slashing across collaterals → VetoSlasher handles veto period
 
+### Blockchain Node & Consensus Integration
+
+- Each validator node runs its own Ethereum node and reads Symbiotic events directly via the **restaking sync module**. Non-validator nodes are not required to run an Ethereum node.
+- **Block proposer** reads the latest Symbiotic state changes from their ETH node and includes `SymbioticRequests` + `SymbioticSyncHeight` (h₁) in the new beacon block.
+- **All validator nodes independently verify**: they read their own ETH node for blocks h₀+1 through h₁ and confirm the `SymbioticRequests` in the proposed block match exactly. The block is only accepted and signed if they match.
+- **BLS signature verification** happens on every validator node (not just the proposer) when processing a `CreateVault` (ValidatorCreated) request.
+- **Two parallel sync paths**:
+  - **Consensus layer**: Symbiotic events → `SymbioticBalances` / `SymbioticWeights` in beacon state → effective balance calculation → reward split between native and restaking
+  - **Execution layer**: Oracle → `RestakingStates` contracts → per-staker balance tracking → `Rewarder` distributes rewards proportionally
+- **Effective balance**: `effectiveBalance = nativeStaked + Σ(staked_c × weight_c)`
+- **Reward split**: Consensus layer creates `Withdrawals[0]` (native staker's withdrawal credential) and `Withdrawals[1]` (validator's Rewarder contract address), proportional to each side's contribution to effective balance.
+
 ## Design Patterns
 
 - **BeaconProxy**: Upgradeable operators and rewarders
@@ -89,6 +101,15 @@ Multiple 0G Chains with distinct chain IDs can share a single Ethereum-side rest
 - No bracket spacing (`{a: 1}` not `{ a: 1 }`)
 - Multiline function headers: params first
 
+## Documentation Conventions
+
+- Use Mermaid for all diagrams (flowcharts, sequences, dependency graphs)
+- Flowcharts: `flowchart TD` (top-down) with subgraphs for grouping
+- Sequence diagrams: `sequenceDiagram` with participant aliases
+- Node shapes: `["text"]` for standard boxes
+- Arrows: `-->` for flow, `-->|label|` for labeled edges
+- Subgraph naming: `name["Display Name"]`
+
 ## Deployment
 
 Scripts in `script/deploy/`. Key env vars: `PRIVATE_KEY`, `ETH_RPC_URL`, `ETH_RPC_URL_HOLESKY`, `ZG_RPC`. Deployment artifacts stored in `deployments/`.
@@ -102,3 +123,9 @@ forge script script/deploy/Rewarder.s.sol --rpc-url "$ZG_RPC" --broadcast --slow
 ## Testing Patterns
 
 Test base class `ZeroGravityBase.t.sol` sets up the full Symbiotic infrastructure (registries, factories, services). Tests use mock tokens and create validators/operators through the factory. `RewarderBase.t.sol` provides helpers for rewarder testing on the 0G chain side.
+
+## Reference Documentation
+
+- `docs/restaking.md` — Protocol specification: ChainSpec, BeaconBlock, BeaconState, effective balance formula, reward distribution, restaking request types (CreateVault, BalanceChange, WeightUpdated, CreateSatelliteVault)
+- `docs/architecture.md` — Contract dependency graph, storage layout, proxy patterns, access control matrix, reward distribution model, slashing model
+- `docs/integration.md` — Step-by-step integration guide for validators, stakers, and satellite chains
