@@ -56,7 +56,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         mapping(address => mapping(address => address)) createdVaults; // operator => collateral => created vault
         EnumerableSet.UintSet satelliteChains; // satellite chains
         mapping(uint256 => SatelliteChainParams) satelliteChainParams; // satellite chain id => satellite chain params
-        mapping(bytes32 => mapping(uint256 => bytes)) satelliteValidatorInfo; // sha256(primary chain pubkey) => satellite chain id => satellite chain validator info
+        mapping(bytes32 => mapping(uint256 => bytes)) satelliteValidatorInfo; // keccak256(pubkey) => satellite chain id => satellite chain validator info
     }
 
     // keccak256(abi.encode(uint256(keccak256("0g.storage.ZeroGravityFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -239,6 +239,50 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
         $.satelliteChainParams[chainId] = params;
         emit UpdateSatelliteChainParams(chainId, params);
+    }
+
+    function createSatelliteValidator(
+        bytes memory pubkey,
+        uint256 chainId,
+        bytes memory signature,
+        bytes memory _satelliteValidatorInfo
+    ) external override whenNotPaused {
+        if (pubkey.length != PUBLIC_KEY_LENGTH) {
+            revert InvalidPubKeyLength();
+        }
+
+        if (signature.length != SIGNATURE_LENGTH) {
+            revert InvalidSignatureLength();
+        }
+
+        if (!_isSatelliteChain(chainId)) {
+            revert InvalidSatelliteChain();
+        }
+
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        if (IBaseMiddlewareReader($.middleware).operatorByKey(pubkey) == address(0)) {
+            revert MainChainValidatorNotFound();
+        }
+
+        SatelliteChainParams memory params = $.satelliteChainParams[chainId];
+        address rewarder;
+        if (params.rewarderFactory != address(0) && params.rewarderInitCodeHash != bytes32(0)) {
+            rewarder = Create2Helper.computeCreate2Address(
+                params.rewarderFactory, keccak256(pubkey), params.rewarderInitCodeHash
+            );
+        }
+
+        $.satelliteValidatorInfo[keccak256(pubkey)][chainId] = _satelliteValidatorInfo;
+
+        emit SatelliteValidatorCreated(chainId, pubkey, signature, _satelliteValidatorInfo, rewarder);
+    }
+
+    function getSatelliteValidatorInfo(
+        bytes memory pubkey,
+        uint256 chainId
+    ) external view override returns (bytes memory) {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        return $.satelliteValidatorInfo[keccak256(pubkey)][chainId];
     }
 
     function createValidator(

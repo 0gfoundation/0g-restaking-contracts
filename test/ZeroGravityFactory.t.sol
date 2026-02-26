@@ -141,4 +141,158 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         network.createValidator(new bytes(48), new bytes(32), new bytes(96), address(val), address(zgtoken), 32 * 1e18);
         vm.stopPrank();
     }
+
+    // ─── Satellite chain admin tests ────────────────────────────────────
+
+    function test_AddSatelliteChain() public {
+        uint256 chainId = 12_345;
+        IZeroGravityFactory.SatelliteChainParams memory params = IZeroGravityFactory.SatelliteChainParams({
+            chainType: IZeroGravityFactory.ChainType.EVM,
+            rewarderFactory: address(0xdead),
+            rewarderInitCodeHash: bytes32(uint256(1)),
+            customMetadata: "test"
+        });
+
+        network.addSatelliteChain(chainId, params);
+
+        assertTrue(network.isSatelliteChain(chainId));
+        assertFalse(network.isSatelliteChain(99_999));
+
+        IZeroGravityFactory.SatelliteChainParams memory stored = network.getSatelliteChainParams(chainId);
+        assertEq(uint8(stored.chainType), uint8(IZeroGravityFactory.ChainType.EVM));
+        assertEq(stored.rewarderFactory, address(0xdead));
+        assertEq(stored.rewarderInitCodeHash, bytes32(uint256(1)));
+        assertEq(stored.customMetadata, "test");
+    }
+
+    function test_UpdateSatelliteChainParams() public {
+        uint256 chainId = 12_345;
+        IZeroGravityFactory.SatelliteChainParams memory params = IZeroGravityFactory.SatelliteChainParams({
+            chainType: IZeroGravityFactory.ChainType.EVM,
+            rewarderFactory: address(0xdead),
+            rewarderInitCodeHash: bytes32(uint256(1)),
+            customMetadata: "original"
+        });
+        network.addSatelliteChain(chainId, params);
+
+        IZeroGravityFactory.SatelliteChainParams memory updated = IZeroGravityFactory.SatelliteChainParams({
+            chainType: IZeroGravityFactory.ChainType.EVM,
+            rewarderFactory: address(0xbeef),
+            rewarderInitCodeHash: bytes32(uint256(2)),
+            customMetadata: "updated"
+        });
+        network.updateSatelliteChainParams(chainId, updated);
+
+        IZeroGravityFactory.SatelliteChainParams memory stored = network.getSatelliteChainParams(chainId);
+        assertEq(stored.rewarderFactory, address(0xbeef));
+        assertEq(stored.rewarderInitCodeHash, bytes32(uint256(2)));
+        assertEq(stored.customMetadata, "updated");
+    }
+
+    // ─── Satellite validator tests ──────────────────────────────────────
+
+    function _createMainChainValidator(
+        bytes memory pubkey
+    ) internal {
+        network.updateCollateralConfig(address(zgtoken), 32 * 1e18);
+        middleware.setCollateralWeight(address(zgtoken), 1e18);
+        address val = makeAddr("validator#satellite");
+        _topUpTokens(val);
+        vm.startPrank(val);
+        network.createValidator(pubkey, new bytes(32), new bytes(96), val, address(zgtoken), 32 * 1e18);
+        vm.stopPrank();
+    }
+
+    function _addSatelliteChain(
+        uint256 chainId
+    ) internal {
+        IZeroGravityFactory.SatelliteChainParams memory params = IZeroGravityFactory.SatelliteChainParams({
+            chainType: IZeroGravityFactory.ChainType.EVM,
+            rewarderFactory: address(rewarderFactory),
+            rewarderInitCodeHash: rewarderFactory.rewarderInitCodeHash(),
+            customMetadata: ""
+        });
+        network.addSatelliteChain(chainId, params);
+    }
+
+    function test_CreateSatelliteValidator() public {
+        bytes memory pubkey = new bytes(48);
+        uint256 chainId = 42;
+
+        _createMainChainValidator(pubkey);
+        _addSatelliteChain(chainId);
+
+        bytes memory satInfo = abi.encode("satellite-info");
+        bytes memory sig = new bytes(96);
+
+        vm.expectEmit(true, false, false, true);
+        emit IZeroGravityFactory.SatelliteValidatorCreated(
+            chainId, pubkey, sig, satInfo, rewarderFactory.previewRewarder(pubkey)
+        );
+
+        network.createSatelliteValidator(pubkey, chainId, sig, satInfo);
+
+        assertEq(network.getSatelliteValidatorInfo(pubkey, chainId), satInfo);
+    }
+
+    function test_CreateSatelliteValidatorResubmit() public {
+        bytes memory pubkey = new bytes(48);
+        uint256 chainId = 42;
+
+        _createMainChainValidator(pubkey);
+        _addSatelliteChain(chainId);
+
+        bytes memory satInfo1 = abi.encode("info-v1");
+        network.createSatelliteValidator(pubkey, chainId, new bytes(96), satInfo1);
+        assertEq(network.getSatelliteValidatorInfo(pubkey, chainId), satInfo1);
+
+        bytes memory satInfo2 = abi.encode("info-v2");
+        network.createSatelliteValidator(pubkey, chainId, new bytes(96), satInfo2);
+        assertEq(network.getSatelliteValidatorInfo(pubkey, chainId), satInfo2);
+    }
+
+    function test_CreateSatelliteValidatorMultipleChains() public {
+        bytes memory pubkey = new bytes(48);
+        uint256 chainA = 100;
+        uint256 chainB = 200;
+
+        _createMainChainValidator(pubkey);
+        _addSatelliteChain(chainA);
+        _addSatelliteChain(chainB);
+
+        bytes memory infoA = abi.encode("chain-A");
+        bytes memory infoB = abi.encode("chain-B");
+
+        network.createSatelliteValidator(pubkey, chainA, new bytes(96), infoA);
+        network.createSatelliteValidator(pubkey, chainB, new bytes(96), infoB);
+
+        assertEq(network.getSatelliteValidatorInfo(pubkey, chainA), infoA);
+        assertEq(network.getSatelliteValidatorInfo(pubkey, chainB), infoB);
+    }
+
+    function test_CreateSatelliteValidatorRevertInvalidSatelliteChain() public {
+        bytes memory pubkey = new bytes(48);
+        _createMainChainValidator(pubkey);
+
+        vm.expectRevert(IZeroGravityFactory.InvalidSatelliteChain.selector);
+        network.createSatelliteValidator(pubkey, 99_999, new bytes(96), "info");
+    }
+
+    function test_CreateSatelliteValidatorRevertMainChainValidatorNotFound() public {
+        uint256 chainId = 42;
+        _addSatelliteChain(chainId);
+
+        vm.expectRevert(IZeroGravityFactory.MainChainValidatorNotFound.selector);
+        network.createSatelliteValidator(new bytes(48), chainId, new bytes(96), "info");
+    }
+
+    function test_CreateSatelliteValidatorRevertInvalidPubKeyLength() public {
+        vm.expectRevert(IZeroGravityFactory.InvalidPubKeyLength.selector);
+        network.createSatelliteValidator(new bytes(32), 42, new bytes(96), "info");
+    }
+
+    function test_CreateSatelliteValidatorRevertInvalidSignatureLength() public {
+        vm.expectRevert(IZeroGravityFactory.InvalidSignatureLength.selector);
+        network.createSatelliteValidator(new bytes(48), 42, new bytes(64), "info");
+    }
 }

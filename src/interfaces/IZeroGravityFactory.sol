@@ -11,6 +11,8 @@ interface IZeroGravityFactory {
     error InvalidCredentialsLength();
     error InvalidSignatureLength();
     error MissingRewarderCreate2Info();
+    error InvalidSatelliteChain();
+    error MainChainValidatorNotFound();
 
     struct InitParams {
         address vaultConfigurator;
@@ -55,6 +57,10 @@ interface IZeroGravityFactory {
         address operator
     );
 
+    event SatelliteValidatorCreated(
+        uint256 indexed chainId, bytes pubkey, bytes signature, bytes satelliteValidatorInfo, address rewarder
+    );
+
     /// @dev Emitted when a satellite chain is added
     /// @param chainId The id of the satellite chain
     event AddSatelliteChain(uint256 chainId);
@@ -80,4 +86,13 @@ interface IZeroGravityFactory {
         address collateral,
         uint256 amount
     ) external;
+
+    function createSatelliteValidator(
+        bytes memory pubkey,
+        uint256 chainId,
+        bytes memory signature,
+        bytes memory satelliteValidatorInfo
+    ) external;
+
+    function getSatelliteValidatorInfo(bytes memory pubkey, uint256 chainId) external view returns (bytes memory);
 }
