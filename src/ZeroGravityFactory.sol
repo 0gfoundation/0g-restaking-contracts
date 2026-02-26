@@ -31,6 +31,7 @@ import {PauseControl} from "./security/PauseControl.sol";
 contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
     using EnumerableMap for EnumerableMap.AddressToUintMap;
     using EnumerableSet for EnumerableSet.AddressSet;
+    using EnumerableSet for EnumerableSet.UintSet;
     using SafeERC20 for IERC20;
 
     /// @custom:storage-location erc7201:0g.storage.ZeroGravityFactory
@@ -53,6 +54,9 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         EnumerableMap.AddressToUintMap minValidatorDeposit; // minimal amount to deposit when create validator
         mapping(bytes32 => address) operators; // create2 salt => operator address
         mapping(address => mapping(address => address)) createdVaults; // operator => collateral => created vault
+        EnumerableSet.UintSet satelliteChains; // satellite chains
+        mapping(uint256 => SatelliteChainParams) satelliteChainParams; // satellite chain id => satellite chain params
+        mapping(bytes32 => mapping(uint256 => bytes)) satelliteValidatorInfo; // sha256(primary chain pubkey) => satellite chain id => satellite chain validator info
     }
 
     // keccak256(abi.encode(uint256(keccak256("0g.storage.ZeroGravityFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -177,6 +181,64 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
             );
             $.operators[salt] = operator;
         }
+    }
+
+    /// @dev Add a satellite chain
+    /// @param chainId The id of the satellite chain
+    /// @param params The params of the satellite chain
+    function addSatelliteChain(
+        uint256 chainId,
+        SatelliteChainParams memory params
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+
+        $.satelliteChains.add(chainId);
+        emit AddSatelliteChain(chainId);
+
+        _updateSatelliteChainParams(chainId, params);
+    }
+
+    /// @dev Check if a chain is a satellite chain
+    function isSatelliteChain(
+        uint256 chainId
+    ) external view override returns (bool) {
+        return _isSatelliteChain(chainId);
+    }
+
+    function _isSatelliteChain(
+        uint256 chainId
+    ) internal view returns (bool) {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        return $.satelliteChains.contains(chainId);
+    }
+
+    /// @dev Update the params of a satellite chain
+    /// @param chainId The id of the satellite chain
+    /// @param params The params of the satellite chain
+    function updateSatelliteChainParams(
+        uint256 chainId,
+        SatelliteChainParams memory params
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _updateSatelliteChainParams(chainId, params);
+    }
+
+    function getSatelliteChainParams(
+        uint256 chainId
+    ) external view override returns (SatelliteChainParams memory params) {
+        params = _getSatelliteChainParams(chainId);
+    }
+
+    function _getSatelliteChainParams(
+        uint256 chainId
+    ) internal view returns (SatelliteChainParams memory params) {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        params = $.satelliteChainParams[chainId];
+    }
+
+    function _updateSatelliteChainParams(uint256 chainId, SatelliteChainParams memory params) internal {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        $.satelliteChainParams[chainId] = params;
+        emit UpdateSatelliteChainParams(chainId, params);
     }
 
     function createValidator(

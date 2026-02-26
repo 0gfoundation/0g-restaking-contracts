@@ -29,6 +29,22 @@ interface IZeroGravityFactory {
         bytes32 rewarderInitCodeHash;
     }
 
+    enum ChainType {
+        EVM
+    }
+
+    /// @dev Params for creating a satellite chain
+    /// @param chainType The type of the satellite chain
+    /// @param rewarderFactory The address of the rewarder factory contract
+    /// @param rewarderInitCodeHash The init code hash of the rewarder contract
+    /// @param customMetadata The custom metadata for the satellite chain
+    struct SatelliteChainParams {
+        ChainType chainType;
+        address rewarderFactory;
+        bytes32 rewarderInitCodeHash;
+        bytes customMetadata;
+    }
+
     event ValidatorCreated(
         bytes pubkey,
         bytes credentials,
@@ -38,6 +54,23 @@ interface IZeroGravityFactory {
         address vault,
         address operator
     );
+
+    /// @dev Emitted when a satellite chain is added
+    /// @param chainId The id of the satellite chain
+    event AddSatelliteChain(uint256 chainId);
+
+    /// @dev Emitted when the params of a satellite chain is updated
+    /// @param chainId The id of the satellite chain
+    /// @param params The new params of the satellite chain
+    event UpdateSatelliteChainParams(uint256 chainId, SatelliteChainParams params);
+
+    function isSatelliteChain(
+        uint256 chainId
+    ) external view returns (bool);
+
+    function getSatelliteChainParams(
+        uint256 chainId
+    ) external view returns (SatelliteChainParams memory params);
 
     function createValidator(
         bytes memory pubkey,
