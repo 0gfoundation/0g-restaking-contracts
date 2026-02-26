@@ -93,6 +93,4 @@ interface IZeroGravityFactory {
         bytes memory signature,
         bytes memory satelliteValidatorInfo
     ) external;
-
-    function getSatelliteValidatorInfo(bytes memory pubkey, uint256 chainId) external view returns (bytes memory);
 }

@@ -54,6 +54,8 @@ contract AscendRouter is AccessControlUpgradeable, IAscendRouter {
         $.mellowVaultPercentage = mellowVaultPercentage;
         $.foundationPercentage = foundationPercentage;
         $.paymentLayerPercentage = paymentLayerPercentage;
+
+        _checkParams();
     }
 
     function _checkParams() internal view {
@@ -78,6 +80,8 @@ contract AscendRouter is AccessControlUpgradeable, IAscendRouter {
         $.mellowVaultPercentage = mellowVaultPercentage;
         $.foundationPercentage = foundationPercentage;
         $.paymentLayerPercentage = paymentLayerPercentage;
+
+        _checkParams();
     }
 
     // View function to get current parameters

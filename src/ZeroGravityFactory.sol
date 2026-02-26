@@ -56,7 +56,6 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         mapping(address => mapping(address => address)) createdVaults; // operator => collateral => created vault
         EnumerableSet.UintSet satelliteChains; // satellite chains
         mapping(uint256 => SatelliteChainParams) satelliteChainParams; // satellite chain id => satellite chain params
-        mapping(bytes32 => mapping(uint256 => bytes)) satelliteValidatorInfo; // keccak256(pubkey) => satellite chain id => satellite chain validator info
     }
 
     // keccak256(abi.encode(uint256(keccak256("0g.storage.ZeroGravityFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -272,17 +271,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
             );
         }
 
-        $.satelliteValidatorInfo[keccak256(pubkey)][chainId] = _satelliteValidatorInfo;
-
         emit SatelliteValidatorCreated(chainId, pubkey, signature, _satelliteValidatorInfo, rewarder);
-    }
-
-    function getSatelliteValidatorInfo(
-        bytes memory pubkey,
-        uint256 chainId
-    ) external view override returns (bytes memory) {
-        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
-        return $.satelliteValidatorInfo[keccak256(pubkey)][chainId];
     }
 
     function createValidator(

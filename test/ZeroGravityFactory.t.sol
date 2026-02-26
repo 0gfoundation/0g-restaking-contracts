@@ -231,8 +231,6 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         );
 
         network.createSatelliteValidator(pubkey, chainId, sig, satInfo);
-
-        assertEq(network.getSatelliteValidatorInfo(pubkey, chainId), satInfo);
     }
 
     function test_CreateSatelliteValidatorResubmit() public {
@@ -244,11 +242,9 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
 
         bytes memory satInfo1 = abi.encode("info-v1");
         network.createSatelliteValidator(pubkey, chainId, new bytes(96), satInfo1);
-        assertEq(network.getSatelliteValidatorInfo(pubkey, chainId), satInfo1);
 
         bytes memory satInfo2 = abi.encode("info-v2");
         network.createSatelliteValidator(pubkey, chainId, new bytes(96), satInfo2);
-        assertEq(network.getSatelliteValidatorInfo(pubkey, chainId), satInfo2);
     }
 
     function test_CreateSatelliteValidatorMultipleChains() public {
@@ -265,9 +261,6 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
 
         network.createSatelliteValidator(pubkey, chainA, new bytes(96), infoA);
         network.createSatelliteValidator(pubkey, chainB, new bytes(96), infoB);
-
-        assertEq(network.getSatelliteValidatorInfo(pubkey, chainA), infoA);
-        assertEq(network.getSatelliteValidatorInfo(pubkey, chainB), infoB);
     }
 
     function test_CreateSatelliteValidatorRevertInvalidSatelliteChain() public {

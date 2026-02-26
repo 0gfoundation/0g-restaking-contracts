@@ -64,9 +64,8 @@ Multiple 0G Chains with distinct chain IDs can share a single Ethereum-side rest
 - **Main Chain**: The primary 0G Chain where validators are first registered via `createValidator()`, creating operator/vault/stake infrastructure.
 - **Satellite Chains**: Additional 0G Chains that reuse the main chain's operator, vaults, and stake — no new vault or deposit required.
 - **`SatelliteChainParams`**: Per-chain config (`chainType`, `rewarderFactory`, `rewarderInitCodeHash`, `customMetadata`). Managed by admin via `addSatelliteChain` / `updateSatelliteChainParams`.
-- **`satelliteValidatorInfo`**: Opaque `bytes` data stored per validator per satellite chain, keyed by `keccak256(pubkey)` and `chainId`. Content is chain-type-specific.
-- **Registration flow**: Main chain validator must exist first. `createSatelliteValidator(pubkey, chainId, signature, info)` validates, computes the deterministic satellite rewarder address, stores info, and emits `SatelliteValidatorCreated` with a 96-byte BLS signature for off-chain node verification.
-- **Key storage**: `satelliteChains` (`EnumerableSet.UintSet`), `satelliteChainParams` (mapping), `satelliteValidatorInfo` (nested mapping).
+- **Registration flow**: `createSatelliteValidator(pubkey, chainId, signature, info)` is permissionless — any caller can invoke it for an existing main chain validator. The contract computes the deterministic satellite rewarder address and emits `SatelliteValidatorCreated`. No validator info is stored on-chain; the blockchain node reads the event and performs BLS signature verification off-chain, ignoring invalid registrations.
+- **Key storage**: `satelliteChains` (`EnumerableSet.UintSet`), `satelliteChainParams` (mapping).
 
 ### Key Flows
 
