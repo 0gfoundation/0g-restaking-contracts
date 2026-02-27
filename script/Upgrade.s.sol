@@ -11,6 +11,7 @@ import {ZeroGravityMiddleware} from "../src/ZeroGravityMiddleware.sol";
 import {ZeroGravityOperator} from "../src/ZeroGravityOperator.sol";
 import {Rewarder} from "../src/Rewarder.sol";
 import {RestakingStates} from "../src/RestakingStates.sol";
+import {AscendRouter} from "../src/ascend/AscendRouter.sol";
 
 import {JsonUtils} from "./deploy/Utils.s.sol";
 
@@ -75,6 +76,22 @@ contract UpgradeScript is Script, JsonUtils {
         restakingStatesBeacon.upgradeTo(address(impl));
 
         vm.writeJson(vm.toString(address(impl)), path, ".RestakingStatesImpl");
+
+        vm.stopBroadcast();
+    }
+    
+    function upgradeAscendRouter() public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+
+        (string memory json, string memory path) = loadOrInitJson("ascend");
+
+        vm.startBroadcast(privKey);
+
+        UpgradeableBeacon ascendRouterBeacon = UpgradeableBeacon(vm.parseJsonAddress(json, ".AscendRouterBeacon"));
+        AscendRouter impl = new AscendRouter();
+        ascendRouterBeacon.upgradeTo(address(impl));
+
+        vm.writeJson(vm.toString(address(impl)), path, ".AscendRouterImpl");
 
         vm.stopBroadcast();
     }
