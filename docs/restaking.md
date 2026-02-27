@@ -147,6 +147,14 @@ SatelliteBalanceSnapshot(uint256 indexed chainId, bytes pubkey, address vault, a
 
 This provides the satellite chain node with a snapshot of the current active stake per vault so it can initialize its `SymbioticBalances` without replaying all historical `Deposit`/`Withdraw`/`OnSlash` events. The `activeStake` value reflects the actively slashable collateral (deposits minus withdrawals minus slashed amounts), excluding pending withdrawals.
 
+When a satellite chain is first added via `addSatelliteChain()`, a `SatelliteWeightSnapshot` event is emitted for each whitelisted collateral:
+
+```
+SatelliteWeightSnapshot(uint256 indexed chainId, address collateral, uint256 weight)
+```
+
+This provides the satellite chain node with the current collateral weights so it can initialize its `SymbioticWeights` without replaying all historical `WeightUpdated` events.
+
 Each satellite chain is configured with `SatelliteChainParams` (`chainType`, `rewarderFactory`, `rewarderInitCodeHash`, `customMetadata`), managed by admin via `addSatelliteChain` / `updateSatelliteChainParams`.
 
 ## Related Documentation

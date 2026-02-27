@@ -23,6 +23,7 @@ import {IBaseMiddlewareReader} from "middleware-sdk/interfaces/IBaseMiddlewareRe
 import {IZeroGravityFactory} from "./interfaces/IZeroGravityFactory.sol";
 import {IZeroGravityOperator} from "./interfaces/IZeroGravityOperator.sol";
 import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddleware.sol";
+import {IWeightedStakePower} from "./interfaces/IWeightedStakePower.sol";
 
 import {Create2Helper} from "./libraries/Create2Helper.sol";
 
@@ -227,6 +228,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         emit AddSatelliteChain(chainId);
 
         _updateSatelliteChainParams(chainId, params);
+        _emitSatelliteWeightSnapshots(chainId);
     }
 
     /// @dev Check if a chain is a satellite chain
@@ -337,6 +339,25 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
             if (vault != address(0)) {
                 emit SatelliteBalanceSnapshot(chainId, pubkey, vault, collateral, IVault(vault).activeStake());
             }
+        }
+    }
+
+    /**
+     * @dev Emits a SatelliteWeightSnapshot event for each whitelisted collateral.
+     *      Allows the satellite chain node to initialize its SymbioticWeights without replaying
+     *      all historical WeightUpdated events.
+     * @param chainId The satellite chain ID
+     */
+    function _emitSatelliteWeightSnapshots(
+        uint256 chainId
+    ) internal {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        uint256 collateralCount = $.minValidatorDeposit.length();
+        for (uint256 i; i < collateralCount; ++i) {
+            (address collateral,) = $.minValidatorDeposit.at(i);
+            uint256 weight =
+                IWeightedStakePower($.middleware).getCollateralWeight(collateral, uint48(block.timestamp), "");
+            emit SatelliteWeightSnapshot(chainId, collateral, weight);
         }
     }
 

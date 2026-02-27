@@ -145,6 +145,10 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
     // ─── Satellite chain admin tests ────────────────────────────────────
 
     function test_AddSatelliteChain() public {
+        // Set up a collateral so we can verify weight snapshot events
+        network.updateCollateralConfig(address(zgtoken), 32 * 1e18);
+        middleware.setCollateralWeight(address(zgtoken), 1e18);
+
         uint256 chainId = 12_345;
         IZeroGravityFactory.SatelliteChainParams memory params = IZeroGravityFactory.SatelliteChainParams({
             chainType: IZeroGravityFactory.ChainType.EVM,
@@ -152,6 +156,9 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
             rewarderInitCodeHash: bytes32(uint256(1)),
             customMetadata: "test"
         });
+
+        vm.expectEmit(true, false, false, true);
+        emit IZeroGravityFactory.SatelliteWeightSnapshot(chainId, address(zgtoken), 1e18);
 
         network.addSatelliteChain(chainId, params);
 
@@ -163,6 +170,29 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         assertEq(stored.rewarderFactory, address(0xdead));
         assertEq(stored.rewarderInitCodeHash, bytes32(uint256(1)));
         assertEq(stored.customMetadata, "test");
+    }
+
+    function test_AddSatelliteChainMultiCollateralWeights() public {
+        // Set up two collaterals with different weights
+        network.updateCollateralConfig(address(zgtoken), 32 * 1e18);
+        middleware.setCollateralWeight(address(zgtoken), 1e18);
+        network.updateCollateralConfig(address(eth), 1 * 1e18);
+        middleware.setCollateralWeight(address(eth), 10 * 1e18);
+
+        uint256 chainId = 42;
+        IZeroGravityFactory.SatelliteChainParams memory params = IZeroGravityFactory.SatelliteChainParams({
+            chainType: IZeroGravityFactory.ChainType.EVM,
+            rewarderFactory: address(0xdead),
+            rewarderInitCodeHash: bytes32(uint256(1)),
+            customMetadata: ""
+        });
+
+        vm.expectEmit(true, false, false, true);
+        emit IZeroGravityFactory.SatelliteWeightSnapshot(chainId, address(zgtoken), 1e18);
+        vm.expectEmit(true, false, false, true);
+        emit IZeroGravityFactory.SatelliteWeightSnapshot(chainId, address(eth), 10 * 1e18);
+
+        network.addSatelliteChain(chainId, params);
     }
 
     function test_UpdateSatelliteChainParams() public {

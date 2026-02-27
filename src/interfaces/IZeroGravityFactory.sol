@@ -140,6 +140,16 @@ interface IZeroGravityFactory {
         uint256 indexed chainId, bytes pubkey, address vault, address collateral, uint256 activeStake
     );
 
+    /**
+     * @dev Emitted once per collateral when a satellite chain is added, providing the current weight
+     *      so the satellite chain node can initialize its SymbioticWeights without replaying all
+     *      historical WeightUpdated events.
+     * @param chainId The satellite chain ID
+     * @param collateral Address of the collateral token
+     * @param weight The current weight of the collateral
+     */
+    event SatelliteWeightSnapshot(uint256 indexed chainId, address collateral, uint256 weight);
+
     /// @dev Emitted when a satellite chain is added
     /// @param chainId The id of the satellite chain
     event AddSatelliteChain(uint256 chainId);
