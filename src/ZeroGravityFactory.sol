@@ -23,14 +23,23 @@ import {IBaseMiddlewareReader} from "middleware-sdk/interfaces/IBaseMiddlewareRe
 import {IZeroGravityFactory} from "./interfaces/IZeroGravityFactory.sol";
 import {IZeroGravityOperator} from "./interfaces/IZeroGravityOperator.sol";
 import {IZeroGravityMiddleware} from "./interfaces/IZeroGravityMiddleware.sol";
+import {IWeightedStakePower} from "./interfaces/IWeightedStakePower.sol";
 
 import {Create2Helper} from "./libraries/Create2Helper.sol";
 
 import {PauseControl} from "./security/PauseControl.sol";
 
+/**
+ * @title ZeroGravityFactory
+ * @notice Main entry point for creating 0G validator infrastructure on Ethereum.
+ * @dev Creates operator contracts (BeaconProxy), Symbiotic vaults with OperatorNetworkSpecificDelegator
+ *      and VetoSlasher, handles all opt-ins and middleware registrations. Manages collateral whitelisting,
+ *      minimum deposit requirements, and satellite chain configurations. Also acts as the Symbiotic network.
+ */
 contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
     using EnumerableMap for EnumerableMap.AddressToUintMap;
     using EnumerableSet for EnumerableSet.AddressSet;
+    using EnumerableSet for EnumerableSet.UintSet;
     using SafeERC20 for IERC20;
 
     /// @custom:storage-location erc7201:0g.storage.ZeroGravityFactory
@@ -53,6 +62,8 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         EnumerableMap.AddressToUintMap minValidatorDeposit; // minimal amount to deposit when create validator
         mapping(bytes32 => address) operators; // create2 salt => operator address
         mapping(address => mapping(address => address)) createdVaults; // operator => collateral => created vault
+        EnumerableSet.UintSet satelliteChains; // satellite chains
+        mapping(uint256 => SatelliteChainParams) satelliteChainParams; // satellite chain id => satellite chain params
     }
 
     // keccak256(abi.encode(uint256(keccak256("0g.storage.ZeroGravityFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -65,7 +76,9 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         }
     }
 
+    /// @dev Role required to update collateral configurations
     bytes32 public constant UPDATE_COLLATERAL_ROLE = keccak256("UPDATE_COLLATERAL_ROLE");
+
     uint96 internal constant DEFAULT_SUBNETWORK = 0;
 
     /// @dev The length of the public key, PUBLIC_KEY_LENGTH bytes.
@@ -77,6 +90,8 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
     /// @dev The length of the credentials, 1 byte prefix + 11 bytes padding + 20 bytes address = 32 bytes.
     uint8 internal constant CREDENTIALS_LENGTH = 32;
 
+    /// @notice Initializes the factory with configuration parameters and grants roles to the deployer.
+    /// @param params ABI-encoded InitParams struct
     function initialize(
         bytes memory params
     ) external initializer {
@@ -88,6 +103,7 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         _setParams(params);
     }
 
+    /// @dev Decodes and stores initialization parameters.
     function _setParams(
         bytes memory params
     ) internal {
@@ -111,6 +127,8 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         $.rewarderInitCodeHash = p.rewarderInitCodeHash;
     }
 
+    /// @notice Returns the current factory configuration parameters.
+    /// @return params The current InitParams
     function getParams() external view returns (InitParams memory params) {
         ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
         params = InitParams({
@@ -131,12 +149,18 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         });
     }
 
+    /// @notice Updates the factory configuration parameters. Admin only.
+    /// @param params ABI-encoded InitParams struct
     function setParams(
         bytes memory params
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _setParams(params);
     }
 
+    /// @notice Registers this factory as a Symbiotic network and sets the middleware.
+    /// @param middleware Address of the ZeroGravityMiddleware contract
+    /// @param networkRegistry Address of the Symbiotic NetworkRegistry
+    /// @param networkMiddlewareService Address of the Symbiotic NetworkMiddlewareService
     function registerNetwork(
         address middleware,
         address networkRegistry,
@@ -148,6 +172,8 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         INetworkMiddlewareService(networkMiddlewareService).setMiddleware(middleware);
     }
 
+    /// @notice Updates the init code hash used for rewarder Create2 address computation.
+    /// @param hash The new init code hash
     function updateRewarderInitCodeHash(
         bytes32 hash
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -155,6 +181,10 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         $.rewarderInitCodeHash = hash;
     }
 
+    /// @notice Configures the minimum deposit for a collateral token. Set to 0 to disable minimum.
+    /// @dev Adding a new collateral also whitelists it for validator creation.
+    /// @param collateral Address of the collateral token
+    /// @param minValidatorDeposit Minimum deposit amount required when creating a validator with this collateral
     function updateCollateralConfig(
         address collateral,
         uint256 minValidatorDeposit
@@ -163,6 +193,12 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         $.minValidatorDeposit.set(collateral, minValidatorDeposit);
     }
 
+    /**
+     * @dev Creates a new operator BeaconProxy if one doesn't already exist for the given public key.
+     *      Looks up the operator by key via middleware; if not found, deploys a new BeaconProxy.
+     * @param pubkey The validator's BLS public key
+     * @return operator Address of the operator contract (existing or newly created)
+     */
     function _createOperatorIfNotExists(
         bytes memory pubkey
     ) internal returns (address operator) {
@@ -179,6 +215,165 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         }
     }
 
+    /// @dev Add a satellite chain
+    /// @param chainId The id of the satellite chain
+    /// @param params The params of the satellite chain
+    function addSatelliteChain(
+        uint256 chainId,
+        SatelliteChainParams memory params
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+
+        $.satelliteChains.add(chainId);
+        emit AddSatelliteChain(chainId);
+
+        _updateSatelliteChainParams(chainId, params);
+        _emitSatelliteWeightSnapshots(chainId);
+    }
+
+    /// @dev Check if a chain is a satellite chain
+    function isSatelliteChain(
+        uint256 chainId
+    ) external view override returns (bool) {
+        return _isSatelliteChain(chainId);
+    }
+
+    function _isSatelliteChain(
+        uint256 chainId
+    ) internal view returns (bool) {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        return $.satelliteChains.contains(chainId);
+    }
+
+    /// @dev Update the params of a satellite chain
+    /// @param chainId The id of the satellite chain
+    /// @param params The params of the satellite chain
+    function updateSatelliteChainParams(
+        uint256 chainId,
+        SatelliteChainParams memory params
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _updateSatelliteChainParams(chainId, params);
+    }
+
+    /// @notice Returns the configuration parameters for a satellite chain.
+    /// @param chainId The satellite chain ID
+    /// @return params The satellite chain parameters
+    function getSatelliteChainParams(
+        uint256 chainId
+    ) external view override returns (SatelliteChainParams memory params) {
+        params = _getSatelliteChainParams(chainId);
+    }
+
+    function _getSatelliteChainParams(
+        uint256 chainId
+    ) internal view returns (SatelliteChainParams memory params) {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        params = $.satelliteChainParams[chainId];
+    }
+
+    function _updateSatelliteChainParams(uint256 chainId, SatelliteChainParams memory params) internal {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        $.satelliteChainParams[chainId] = params;
+        emit UpdateSatelliteChainParams(chainId, params);
+    }
+
+    /**
+     * @notice Registers an existing main-chain validator on a satellite chain.
+     * @dev Permissionless — any caller can register a main-chain validator on a satellite chain.
+     *      Computes the deterministic rewarder address for the satellite chain and emits an event.
+     *      No state is stored on-chain; the satellite chain node verifies the BLS signature off-chain.
+     * @param pubkey Validator's BLS public key (48 bytes)
+     * @param chainId Target satellite chain ID (must be registered)
+     * @param signature BLS signature authorizing satellite registration (96 bytes)
+     * @param _satelliteValidatorInfo Satellite-chain-specific validator metadata
+     */
+    function createSatelliteValidator(
+        bytes memory pubkey,
+        uint256 chainId,
+        bytes memory signature,
+        bytes memory _satelliteValidatorInfo
+    ) external override whenNotPaused {
+        if (pubkey.length != PUBLIC_KEY_LENGTH) {
+            revert InvalidPubKeyLength();
+        }
+
+        if (signature.length != SIGNATURE_LENGTH) {
+            revert InvalidSignatureLength();
+        }
+
+        if (!_isSatelliteChain(chainId)) {
+            revert InvalidSatelliteChain();
+        }
+
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        address operator = IBaseMiddlewareReader($.middleware).operatorByKey(pubkey);
+        if (operator == address(0)) {
+            revert MainChainValidatorNotFound();
+        }
+
+        SatelliteChainParams memory params = $.satelliteChainParams[chainId];
+        address rewarder;
+        if (params.rewarderFactory != address(0) && params.rewarderInitCodeHash != bytes32(0)) {
+            rewarder = Create2Helper.computeCreate2Address(
+                params.rewarderFactory, keccak256(pubkey), params.rewarderInitCodeHash
+            );
+        }
+
+        emit SatelliteValidatorCreated(chainId, pubkey, signature, _satelliteValidatorInfo, rewarder);
+        _emitSatelliteBalanceSnapshots(chainId, pubkey, operator);
+    }
+
+    /**
+     * @dev Emits a SatelliteBalanceSnapshot event for each vault associated with the operator.
+     *      Iterates through all whitelisted collaterals and emits snapshot events for vaults that exist.
+     * @param chainId The satellite chain ID
+     * @param pubkey Validator's BLS public key
+     * @param operator Address of the operator contract
+     */
+    function _emitSatelliteBalanceSnapshots(uint256 chainId, bytes memory pubkey, address operator) internal {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        uint256 collateralCount = $.minValidatorDeposit.length();
+        for (uint256 i; i < collateralCount; ++i) {
+            (address collateral,) = $.minValidatorDeposit.at(i);
+            address vault = $.createdVaults[operator][collateral];
+            if (vault != address(0)) {
+                emit SatelliteBalanceSnapshot(chainId, pubkey, vault, collateral, IVault(vault).activeStake());
+            }
+        }
+    }
+
+    /**
+     * @dev Emits a SatelliteWeightSnapshot event for each whitelisted collateral.
+     *      Allows the satellite chain node to initialize its SymbioticWeights without replaying
+     *      all historical WeightUpdated events.
+     * @param chainId The satellite chain ID
+     */
+    function _emitSatelliteWeightSnapshots(
+        uint256 chainId
+    ) internal {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        uint256 collateralCount = $.minValidatorDeposit.length();
+        for (uint256 i; i < collateralCount; ++i) {
+            (address collateral,) = $.minValidatorDeposit.at(i);
+            uint256 weight =
+                IWeightedStakePower($.middleware).getCollateralWeight(collateral, uint48(block.timestamp), "");
+            emit SatelliteWeightSnapshot(chainId, collateral, weight);
+        }
+    }
+
+    /**
+     * @notice Creates a new validator with operator, vault, delegator, and slasher infrastructure.
+     * @dev Full flow: validates inputs, transfers collateral, computes deterministic rewarder address,
+     *      creates operator BeaconProxy (if needed), creates Symbiotic vault/delegator/slasher (if needed
+     *      for this operator+collateral), opts operator into vault and network, registers in middleware,
+     *      emits ValidatorCreated event, and deposits collateral into the vault on behalf of the caller.
+     * @param pubkey Validator's BLS public key (48 bytes)
+     * @param credentials Withdrawal credentials (32 bytes: 1 prefix + 11 padding + 20 address)
+     * @param signature BLS signature authorizing registration (96 bytes)
+     * @param onBehalfOf Address to receive vault deposit shares
+     * @param collateral Address of the whitelisted collateral token
+     * @param amount Amount of collateral to deposit
+     */
     function createValidator(
         bytes memory pubkey,
         bytes memory credentials,

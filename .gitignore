@@ -20,13 +20,11 @@ deployments/**
 !deployments/ascend-16602.json
 !deployments/ascend-16661.json
 
-# Docs
-docs/
-
 # Dotenv file
 .env
 
 .vscode
+.claude/
 
 # abi gen
 abis/

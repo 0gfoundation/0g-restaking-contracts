@@ -20,6 +20,13 @@ import {IZeroGravityFactory} from "./interfaces/IZeroGravityFactory.sol";
 
 import {WeightedStakePower} from "./WeightedStakePower.sol";
 
+/**
+ * @title ZeroGravityMiddleware
+ * @notice 0G middleware integrated with Symbiotic for operator management, key tracking, and slashing.
+ * @dev Inherits from SharedVaults, KeyManagerBytes, Operators, TimestampCapture, OzAccessControl, and
+ *      WeightedStakePower. Handles operator registration/deregistration, BLS key management, collateral
+ *      weight configuration, and proportional slashing across vaults and subnetworks.
+ */
 contract ZeroGravityMiddleware is
     IZeroGravityMiddleware,
     SharedVaults,
@@ -34,11 +41,17 @@ contract ZeroGravityMiddleware is
 
     /// @custom:storage-location erc7201:0g.storage.ZeroGravityMiddleware
     struct ZeroGravityMiddlewareStorage {
-        address network; // network
+        /// @dev Address of the network (ZeroGravityFactory)
+        address network;
     }
 
+    /// @dev Role required to execute slashing
     bytes32 public constant SLASHER_ROLE = keccak256("SLASHER_ROLE");
+
+    /// @dev Role required to register operators
     bytes32 public constant REGISTER_OPERATOR_ROLE = keccak256("REGISTER_OPERATOR_ROLE");
+
+    /// @dev Role required to set collateral weights
     bytes32 public constant WEIGHT_SET_ROLE = keccak256("WEIGHT_SET_ROLE");
 
     // keccak256(abi.encode(uint256(keccak256("0g.storage.ZeroGravityMiddleware")) - 1)) & ~bytes32(uint256(0xff))
@@ -51,6 +64,8 @@ contract ZeroGravityMiddleware is
         }
     }
 
+    /// @notice Initializes the middleware with Symbiotic infrastructure and access control roles.
+    /// @param params ABI-encoded InitParams struct
     function initialize(
         bytes memory params
     ) external initializer {
@@ -72,6 +87,8 @@ contract ZeroGravityMiddleware is
         $.network = p.network;
     }
 
+    /// @notice Updates the slashing window duration.
+    /// @param slashingWindow The new slashing window duration in seconds
     function setSlashingWindow(
         uint48 slashingWindow
     ) external checkAccess {
@@ -80,6 +97,14 @@ contract ZeroGravityMiddleware is
         }
     }
 
+    /**
+     * @dev Registers an operator and optionally associates a vault. If the operator is not yet
+     *      registered, registers them and sets their BLS key. If a vault is provided, registers
+     *      the operator-vault association.
+     * @param operator Address of the operator contract
+     * @param key The operator's BLS public key
+     * @param vault Address of the vault to associate (or address(0) to skip)
+     */
     function _registerOperatorImpl(address operator, bytes memory key, address vault) internal override {
         if (!_isOperatorRegistered(operator)) {
             _beforeRegisterOperator(operator, key, vault);
@@ -92,6 +117,13 @@ contract ZeroGravityMiddleware is
         }
     }
 
+    /**
+     * @dev Resolves an operator's full state at a capture timestamp: their address, active vaults,
+     *      active subnetworks, and total voting power.
+     * @param captureTimestamp The timestamp at which to capture the operator's state
+     * @param key The operator's BLS public key
+     * @return params The operator's resolved state
+     */
     function _getOperatorParams(
         uint48 captureTimestamp,
         bytes memory key
@@ -102,16 +134,20 @@ contract ZeroGravityMiddleware is
         params.totalPower = _getOperatorPowerAt(captureTimestamp, params.operator, params.vaults, params.subnetworks);
     }
 
-    /* 
-     * @notice Slashes a validator based on the provided parameters.
-     * Here are the hints getter
-     * https://github.com/symbioticfi/core/blob/main/src/contracts/hints/VetoSlasherHints.sol
-     * https://github.com/symbioticfi/core/blob/main/src/contracts/hints/DelegatorHints.sol
-     * @param epoch The epoch for which the slashing occurs.
-     * @param key The key of the operator to slash.
-     * @param amount The amount to slash.
-     * @param stakeHints Hints for determining stakes.
-     * @param slashHints Hints for the slashing process.
+    /**
+     * @notice Slashes a validator proportionally across all their vaults and subnetworks.
+     * @dev The slash amount is distributed proportionally based on each vault's weighted power
+     *      relative to the operator's total power. For each vault/subnetwork pair, the power-based
+     *      slash is converted back to a stake amount using the collateral's weight.
+     *      Hint arrays must match vault/subnetwork dimensions.
+     *      See https://github.com/symbioticfi/core/blob/main/src/contracts/hints/VetoSlasherHints.sol
+     *      and https://github.com/symbioticfi/core/blob/main/src/contracts/hints/DelegatorHints.sol
+     * @param captureTimestamp The timestamp at which stake state is captured for slashing
+     * @param key The BLS public key identifying the operator to slash
+     * @param power The total voting power amount to slash
+     * @param stakeHints Hints for stake lookups, indexed [vault][subnetwork]
+     * @param slashHints Hints for the VetoSlasher, indexed per vault
+     * @param weightHints Hints for collateral weight lookups, indexed per vault
      */
     function slash(
         uint48 captureTimestamp,
@@ -161,12 +197,23 @@ contract ZeroGravityMiddleware is
         }
     }
 
+    /// @notice Executes pending slash requests across multiple vaults.
+    /// @param vaults Array of vault addresses with pending slashes
+    /// @param slashIndexes Array of slash request indexes to execute
+    /// @param hints Array of execution hints for each slash
     function executeSlashs(address[] memory vaults, uint256[] memory slashIndexes, bytes[] memory hints) external {
         for (uint256 i = 0; i < vaults.length; ++i) {
             _executeSlash(vaults[i], slashIndexes[i], hints[i]);
         }
     }
 
+    /**
+     * @dev Validates that a slash can be performed: the operator must exist, the key must have
+     *      been active, and the operator must have been active at the capture timestamp.
+     * @param epochStart The capture timestamp for the slash
+     * @param key The operator's BLS public key
+     * @param operator The operator's contract address
+     */
     function _checkCanSlash(uint48 epochStart, bytes memory key, address operator) internal view {
         if (operator == address(0)) {
             revert NotExistKeySlash(); // Revert if the operator does not exist
