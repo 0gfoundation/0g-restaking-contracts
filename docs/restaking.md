@@ -139,6 +139,14 @@ The `createSatelliteValidator()` function is permissionless — any caller can i
 
 The satellite chain node reads the `SatelliteValidatorCreated` event and performs BLS signature verification off-chain. Invalid registrations (bad signature, unknown pubkey) are simply ignored.
 
+In addition to the `SatelliteValidatorCreated` event, a `SatelliteBalanceSnapshot` event is emitted for each vault associated with the validator's operator:
+
+```
+SatelliteBalanceSnapshot(uint256 indexed chainId, bytes pubkey, address vault, address collateral, uint256 activeStake)
+```
+
+This provides the satellite chain node with a snapshot of the current active stake per vault so it can initialize its `SymbioticBalances` without replaying all historical `Deposit`/`Withdraw`/`OnSlash` events. The `activeStake` value reflects the actively slashable collateral (deposits minus withdrawals minus slashed amounts), excluding pending withdrawals.
+
 Each satellite chain is configured with `SatelliteChainParams` (`chainType`, `rewarderFactory`, `rewarderInitCodeHash`, `customMetadata`), managed by admin via `addSatelliteChain` / `updateSatelliteChainParams`.
 
 ## Related Documentation

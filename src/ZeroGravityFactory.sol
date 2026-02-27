@@ -304,7 +304,8 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         }
 
         ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
-        if (IBaseMiddlewareReader($.middleware).operatorByKey(pubkey) == address(0)) {
+        address operator = IBaseMiddlewareReader($.middleware).operatorByKey(pubkey);
+        if (operator == address(0)) {
             revert MainChainValidatorNotFound();
         }
 
@@ -317,6 +318,26 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
         }
 
         emit SatelliteValidatorCreated(chainId, pubkey, signature, _satelliteValidatorInfo, rewarder);
+        _emitSatelliteBalanceSnapshots(chainId, pubkey, operator);
+    }
+
+    /**
+     * @dev Emits a SatelliteBalanceSnapshot event for each vault associated with the operator.
+     *      Iterates through all whitelisted collaterals and emits snapshot events for vaults that exist.
+     * @param chainId The satellite chain ID
+     * @param pubkey Validator's BLS public key
+     * @param operator Address of the operator contract
+     */
+    function _emitSatelliteBalanceSnapshots(uint256 chainId, bytes memory pubkey, address operator) internal {
+        ZeroGravityFactoryStorage storage $ = _getZeroGravityFactoryStorage();
+        uint256 collateralCount = $.minValidatorDeposit.length();
+        for (uint256 i; i < collateralCount; ++i) {
+            (address collateral,) = $.minValidatorDeposit.at(i);
+            address vault = $.createdVaults[operator][collateral];
+            if (vault != address(0)) {
+                emit SatelliteBalanceSnapshot(chainId, pubkey, vault, collateral, IVault(vault).activeStake());
+            }
+        }
     }
 
     /**

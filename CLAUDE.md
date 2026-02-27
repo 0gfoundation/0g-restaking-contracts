@@ -64,7 +64,8 @@ Multiple 0G Chains with distinct chain IDs can share a single Ethereum-side rest
 - **Main Chain**: The primary 0G Chain where validators are first registered via `createValidator()`, creating operator/vault/stake infrastructure.
 - **Satellite Chains**: Additional 0G Chains that reuse the main chain's operator, vaults, and stake — no new vault or deposit required.
 - **`SatelliteChainParams`**: Per-chain config (`chainType`, `rewarderFactory`, `rewarderInitCodeHash`, `customMetadata`). Managed by admin via `addSatelliteChain` / `updateSatelliteChainParams`.
-- **Registration flow**: `createSatelliteValidator(pubkey, chainId, signature, info)` is permissionless — any caller can invoke it for an existing main chain validator. The contract computes the deterministic satellite rewarder address and emits `SatelliteValidatorCreated`. No validator info is stored on-chain; the blockchain node reads the event and performs BLS signature verification off-chain, ignoring invalid registrations.
+- **Registration flow**: `createSatelliteValidator(pubkey, chainId, signature, info)` is permissionless — any caller can invoke it for an existing main chain validator. The contract computes the deterministic satellite rewarder address and emits `SatelliteValidatorCreated`, followed by `SatelliteBalanceSnapshot` events per vault to provide the initial `activeStake` snapshot. No validator info is stored on-chain; the blockchain node reads the events and performs BLS signature verification off-chain, ignoring invalid registrations.
+- **Satellite Chain Sync**: `SatelliteBalanceSnapshot` events provide the initial `activeStake` per vault so the satellite node doesn't need to replay all historical Deposit/Withdraw/OnSlash events.
 - **Key storage**: `satelliteChains` (`EnumerableSet.UintSet`), `satelliteChainParams` (mapping).
 
 ### Key Flows
@@ -72,6 +73,8 @@ Multiple 0G Chains with distinct chain IDs can share a single Ethereum-side rest
 1. **Validator Setup**: `Factory.createValidator()` → creates Operator (BeaconProxy) → creates Vault/Delegator/Slasher → Operator opts into vault+network → Middleware registers operator+vault
 2. **Reward Distribution**: Oracle syncs Ethereum state → RestakingStates → RewarderFactory creates Rewarder → block rewards accumulated → users claim via `Rewarder.claim()`
 3. **Slashing**: `Middleware.slash()` with proof hints → proportional slashing across collaterals → VetoSlasher handles veto period
+4. **Symbiotic Vault Stake Semantics**: `activeStake()` = actively slashable collateral (deposits − withdrawals − active slash portion). `totalStake()` = `activeStake()` + pending withdrawals for current and next epoch.
+5. **Factory Storage Patterns**: `minValidatorDeposit` (EnumerableMap) is the source of truth for iterating all collaterals (never removed). `createdVaults[operator][collateral]` maps to vault addresses.
 
 ### Blockchain Node & Consensus Integration
 

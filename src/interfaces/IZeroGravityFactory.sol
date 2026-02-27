@@ -126,6 +126,20 @@ interface IZeroGravityFactory {
         uint256 indexed chainId, bytes pubkey, bytes signature, bytes satelliteValidatorInfo, address rewarder
     );
 
+    /**
+     * @dev Emitted once per vault during satellite validator creation to provide a snapshot of the
+     *      current active stake. This allows the satellite chain node to initialize its state without
+     *      replaying all historical Deposit/Withdraw/OnSlash events.
+     * @param chainId The satellite chain ID
+     * @param pubkey Validator's BLS public key (48 bytes)
+     * @param vault Address of the Symbiotic vault
+     * @param collateral Address of the collateral token in the vault
+     * @param activeStake Current actively slashable stake in the vault (excludes pending withdrawals)
+     */
+    event SatelliteBalanceSnapshot(
+        uint256 indexed chainId, bytes pubkey, address vault, address collateral, uint256 activeStake
+    );
+
     /// @dev Emitted when a satellite chain is added
     /// @param chainId The id of the satellite chain
     event AddSatelliteChain(uint256 chainId);

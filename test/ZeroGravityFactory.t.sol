@@ -222,13 +222,62 @@ contract ZeroGravityFactoryTest is ZeroGravityBaseTest {
         _createMainChainValidator(pubkey);
         _addSatelliteChain(chainId);
 
+        // Warp so vaults become active at the capture timestamp
+        vm.warp(block.timestamp + 2);
+
         bytes memory satInfo = abi.encode("satellite-info");
         bytes memory sig = new bytes(96);
+
+        address operator = middleware.operatorByKey(pubkey);
+        address vault = reader.activeOperatorVaults(operator)[0];
 
         vm.expectEmit(true, false, false, true);
         emit IZeroGravityFactory.SatelliteValidatorCreated(
             chainId, pubkey, sig, satInfo, rewarderFactory.previewRewarder(pubkey)
         );
+        vm.expectEmit(true, false, false, true);
+        emit IZeroGravityFactory.SatelliteBalanceSnapshot(chainId, pubkey, vault, address(zgtoken), 32 * 1e18);
+
+        network.createSatelliteValidator(pubkey, chainId, sig, satInfo);
+    }
+
+    function test_CreateSatelliteValidatorMultiCollateral() public {
+        bytes memory pubkey = new bytes(48);
+        uint256 chainId = 42;
+
+        // Create main chain validator with zgtoken
+        _createMainChainValidator(pubkey);
+
+        // Add eth collateral and create a second vault for the same validator
+        network.updateCollateralConfig(address(eth), 1 * 1e18);
+        middleware.setCollateralWeight(address(eth), 10 * 1e18);
+        address val = makeAddr("validator#satellite");
+        _topUpTokens(val);
+        vm.startPrank(val);
+        network.createValidator(pubkey, new bytes(32), new bytes(96), val, address(eth), 1 * 1e18);
+        vm.stopPrank();
+
+        _addSatelliteChain(chainId);
+
+        // Warp so vaults become active at the capture timestamp
+        vm.warp(block.timestamp + 2);
+
+        address operator = middleware.operatorByKey(pubkey);
+        address[] memory vaults = reader.activeOperatorVaults(operator);
+        assertEq(vaults.length, 2);
+
+        bytes memory satInfo = abi.encode("multi-collateral");
+        bytes memory sig = new bytes(96);
+
+        // Expect snapshot events for both collaterals
+        vm.expectEmit(true, false, false, true);
+        emit IZeroGravityFactory.SatelliteValidatorCreated(
+            chainId, pubkey, sig, satInfo, rewarderFactory.previewRewarder(pubkey)
+        );
+        vm.expectEmit(true, false, false, true);
+        emit IZeroGravityFactory.SatelliteBalanceSnapshot(chainId, pubkey, vaults[0], address(zgtoken), 32 * 1e18);
+        vm.expectEmit(true, false, false, true);
+        emit IZeroGravityFactory.SatelliteBalanceSnapshot(chainId, pubkey, vaults[1], address(eth), 1 * 1e18);
 
         network.createSatelliteValidator(pubkey, chainId, sig, satInfo);
     }
