@@ -19,6 +19,7 @@ deployments/**
 !deployments/zerogravity-11155111.json
 !deployments/ascend-16602.json
 !deployments/ascend-16661.json
+!deployments/satellite-example.json
 
 # Dotenv file
 .env

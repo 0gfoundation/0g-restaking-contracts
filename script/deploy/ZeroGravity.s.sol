@@ -200,6 +200,50 @@ contract ZeroGravityScript is Script, JsonUtils, Constants {
         vm.stopBroadcast();
     }
 
+    function addSatelliteChain(
+        uint256 satelliteChainId
+    ) external {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+
+        (string memory zjson,) = loadOrInitJson("zerogravity");
+        (string memory sjson,) = loadOrInitJsonWithChainId("satellite", satelliteChainId);
+        (string memory rjson,) = loadOrInitJsonWithChainId("rewarder", satelliteChainId);
+
+        IZeroGravityFactory.SatelliteChainParams memory params = IZeroGravityFactory.SatelliteChainParams({
+            chainType: IZeroGravityFactory.ChainType(uint8(vm.parseJsonUint(sjson, ".ChainType"))),
+            rewarderFactory: vm.parseJsonAddress(rjson, ".RewarderFactory"),
+            rewarderInitCodeHash: vm.parseJsonBytes32(rjson, ".RewarderInitCodeHash"),
+            customMetadata: vm.parseJsonBytes(sjson, ".CustomMetadata")
+        });
+
+        vm.startBroadcast(privKey);
+        ZeroGravityFactory network = ZeroGravityFactory(vm.parseJsonAddress(zjson, ".ZeroGravityFactory"));
+        network.addSatelliteChain(satelliteChainId, params);
+        vm.stopBroadcast();
+    }
+
+    function updateSatelliteChainParams(
+        uint256 satelliteChainId
+    ) external {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+
+        (string memory zjson,) = loadOrInitJson("zerogravity");
+        (string memory sjson,) = loadOrInitJsonWithChainId("satellite", satelliteChainId);
+        (string memory rjson,) = loadOrInitJsonWithChainId("rewarder", satelliteChainId);
+
+        IZeroGravityFactory.SatelliteChainParams memory params = IZeroGravityFactory.SatelliteChainParams({
+            chainType: IZeroGravityFactory.ChainType(uint8(vm.parseJsonUint(sjson, ".ChainType"))),
+            rewarderFactory: vm.parseJsonAddress(rjson, ".RewarderFactory"),
+            rewarderInitCodeHash: vm.parseJsonBytes32(rjson, ".RewarderInitCodeHash"),
+            customMetadata: vm.parseJsonBytes(sjson, ".CustomMetadata")
+        });
+
+        vm.startBroadcast(privKey);
+        ZeroGravityFactory network = ZeroGravityFactory(vm.parseJsonAddress(zjson, ".ZeroGravityFactory"));
+        network.updateSatelliteChainParams(satelliteChainId, params);
+        vm.stopBroadcast();
+    }
+
     function updateCollateral() external {
         uint256 privKey = vm.envUint("PRIVATE_KEY");
 
