@@ -244,6 +244,22 @@ contract ZeroGravityScript is Script, JsonUtils, Constants {
         vm.stopBroadcast();
     }
 
+    function createSatelliteValidator(
+        bytes memory pubkey,
+        uint256 satelliteChainId,
+        bytes memory signature,
+        bytes memory satelliteValidatorInfo
+    ) external {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+
+        (string memory zjson,) = loadOrInitJson("zerogravity");
+
+        vm.startBroadcast(privKey);
+        ZeroGravityFactory network = ZeroGravityFactory(vm.parseJsonAddress(zjson, ".ZeroGravityFactory"));
+        network.createSatelliteValidator(pubkey, satelliteChainId, signature, satelliteValidatorInfo);
+        vm.stopBroadcast();
+    }
+
     function updateCollateral() external {
         uint256 privKey = vm.envUint("PRIVATE_KEY");
 

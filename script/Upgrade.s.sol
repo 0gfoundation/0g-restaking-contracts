@@ -79,7 +79,7 @@ contract UpgradeScript is Script, JsonUtils {
 
         vm.stopBroadcast();
     }
-    
+
     function upgradeAscendRouter() public {
         uint256 privKey = vm.envUint("PRIVATE_KEY");
 

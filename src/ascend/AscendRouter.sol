@@ -11,6 +11,8 @@ import {IAscendRouter} from "../interfaces/IAscendRouter.sol";
 contract AscendRouter is AccessControlUpgradeable, IAscendRouter {
     using SafeERC20 for IERC20;
 
+    bytes32 public constant DISTRIBUTOR_ROLE = keccak256("DISTRIBUTOR_ROLE");
+
     /// @custom:storage-location erc7201:0g.restaking.AscendRouter
     struct AscendRouterStorage {
         address WETH;
@@ -111,7 +113,7 @@ contract AscendRouter is AccessControlUpgradeable, IAscendRouter {
         );
     }
 
-    function distribute() external override {
+    function distribute() external override onlyRole(DISTRIBUTOR_ROLE) {
         AscendRouterStorage storage $ = _getAscendRouterStorage();
         // swap to WETH
         uint256 amount = address(this).balance;
