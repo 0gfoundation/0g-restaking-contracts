@@ -123,6 +123,31 @@ forge script script/deploy/ZeroGravity.s.sol --rpc-url "$ETH_RPC" --broadcast --
 forge script script/deploy/Rewarder.s.sol --rpc-url "$ZG_RPC" --broadcast --slow
 ```
 
+### Bridge: Nick-method raw tx requirement (TODO before mainnet/testnet)
+
+`script/deploy/Bridge.s.sol` currently uses **3 hard-coded devnet test private keys**
+(`DEPLOYER_A/B/C_KEY`) and lets `forge script --broadcast` sign txs at runtime. This is
+**only acceptable for devnet integration tests** — for mainnet/testnet the script must be
+replaced with **Nick-method (keyless) deployment**:
+
+- Construct each of the 8 deploy txs as legacy (pre-EIP-155) RLP, choose a fixed `(r, s)`
+  pair (e.g. `r = s = 0x12...34`), and reverse-derive an ephemeral sender via
+  `ecrecover(txHash, v, r, s)`. **Nobody holds the private key for that sender.**
+- Output the 8 signed raw txs (hex) plus the 3 derived sender addresses, in the same
+  format as the wa0gi precompile raw-tx test fixture in the consensus-layer repo.
+- Pre-allocate gas to the 3 senders in every chain's eth-genesis.
+
+**Why this matters (the security property Nick-method provides):**
+> The sender private keys must be unknowable / destroyed after producing the raw txs.
+> Otherwise an attacker on a freshly-launched chain can pre-fund those senders and
+> broadcast their *own* txs from the same `(sender, nonce 0/1/2)` slots, claiming the
+> deterministic addresses with attacker-controlled bytecode. Hard-coded test keys give an
+> attacker exactly that capability — they only work because devnet operators and attackers
+> are the same person.
+
+`Bridge.s.sol:170-175` `getRawTxs()` is a stub that reverts. Stream A owns finishing it
+before any non-devnet deployment.
+
 ## Testing Patterns
 
 Test base class `ZeroGravityBase.t.sol` sets up the full Symbiotic infrastructure (registries, factories, services). Tests use mock tokens and create validators/operators through the factory. `RewarderBase.t.sol` provides helpers for rewarder testing on the 0G chain side.
