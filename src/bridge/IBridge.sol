@@ -18,12 +18,17 @@ interface IBridge {
 
     /// @notice Inbound message ABI struct, decoded from CL `BridgeMessage` SSZ on the destination side.
     /// @dev Field order is wire-pinned and MUST mirror the EL-side encoder in the bridge crate of 0g-reth.
+    ///      `feeRecipient` is NOT part of the SSZ wire format — it is injected by the EL system-call
+    ///      dispatcher per block, equal to `block.coinbase` (proposer withdrawal address). The
+    ///      destination-side fee logic in `executeRemoteMessages` splits `amount` between `recipient`
+    ///      and `feeRecipient` according to the destination chain's `spamControl[localToken]` config.
     struct InboundMessage {
         uint64 srcChainID;
         uint64 nonce;
         address localToken;
         address recipient;
         uint256 amount;
+        address feeRecipient;
     }
 
     // ============= Errors =============
@@ -55,18 +60,13 @@ interface IBridge {
     /// @dev `setSpamControl` called with `feeBps` exceeding `MAX_FEE_BPS` (20%).
     error FeeBpsTooHigh();
 
-    /// @dev Computed (and clamped) fee is greater than or equal to the user's `amount`, leaving
-    ///      nothing to bridge after the fee deduction.
+    /// @dev Destination-side computed (and clamped) fee is greater than or equal to the inbound
+    ///      `amount`. Reverting blocks delivery so the destination admin can fix `spamControl`
+    ///      (e.g. lower `feeMin`) and the message can be retried via `Bridge.retry`.
     error FeeExceedsAmount();
 
     /// @dev `setSpamControl` called with `feeMin > feeMax`.
     error InvalidFeeBounds();
-
-    /// @dev `setSpamControl` called with `mode == LockRelease`, `feeRecipient == address(0)`, and
-    ///      a non-zero fee. Such a configuration would lock fee tokens in the bridge with no
-    ///      admin sweep path. Use a non-zero `feeRecipient` or set both `feeBps` and `feeMin` to
-    ///      zero to disable the fee.
-    error InvalidLockReleaseFeeConfig();
 
     /// @dev `block.chainid` exceeds `type(uint64).max`. The schema pins `srcChainID` / `dstChainID`
     ///      to u64 on the wire; this guards the narrowing cast in user paths.
@@ -95,7 +95,23 @@ interface IBridge {
     );
 
     /// @notice Emitted on the destination chain when a remote message is successfully executed.
-    event BridgeIn(uint64 indexed srcChainID, uint64 nonce, address localToken, address recipient, uint256 amount);
+    /// @param srcChainID Source chain that produced the message.
+    /// @param nonce Per-(srcCID, dstCID) monotonic nonce.
+    /// @param localToken Token address on this destination chain.
+    /// @param recipient Final receiver on this chain.
+    /// @param amount Amount delivered to `recipient` (i.e. inbound `amount` minus the destination-side fee).
+    /// @param feeRecipient Address that received the fee portion (block proposer's withdrawal address,
+    ///        injected by the EL). `address(0)` if no fee was paid out.
+    /// @param fee Fee paid to `feeRecipient` (zero if `spamControl` is unconfigured or `feeRecipient` is zero).
+    event BridgeIn(
+        uint64 indexed srcChainID,
+        uint64 nonce,
+        address localToken,
+        address recipient,
+        uint256 amount,
+        address feeRecipient,
+        uint256 fee
+    );
 
     /// @notice Emitted on the destination chain when a remote message fails or is a replay.
     /// @param reason ASCII reason like "replay", "disabled", or the upstream revert bytes.
@@ -106,18 +122,12 @@ interface IBridge {
 
     /// @notice Emitted when an admin updates a token's anti-spam controls.
     /// @param token Token whose controls were updated.
-    /// @param minCrossOutAmount New minimum cross-out amount.
-    /// @param feeBps New basis-points fee.
-    /// @param feeMin New floor on the deducted fee.
-    /// @param feeMax New cap on the deducted fee.
-    /// @param feeRecipient New fee receiver (zero leaves fees in the bridge / burns them).
+    /// @param minCrossOutAmount New minimum cross-out amount (source-side anti-spam).
+    /// @param feeBps New basis-points fee (destination-side fee charged on inbound `amount`).
+    /// @param feeMin New floor on the destination-side fee.
+    /// @param feeMax New cap on the destination-side fee.
     event SpamControlUpdated(
-        address indexed token,
-        uint256 minCrossOutAmount,
-        uint16 feeBps,
-        uint256 feeMin,
-        uint256 feeMax,
-        address feeRecipient
+        address indexed token, uint256 minCrossOutAmount, uint16 feeBps, uint256 feeMin, uint256 feeMax
     );
 
     // ============= User paths =============
@@ -165,24 +175,25 @@ interface IBridge {
     /// @return localToken Address of the newly deployed BridgeERC20.
     function deployBridgeERC20(string memory name, string memory symbol) external returns (address localToken);
 
-    /// @notice Configure per-token anti-spam controls (minimum amount + per-tx fee).
-    /// @dev Only callable by `ADMIN_ROLE` (BridgeAgency). All values are stored verbatim and applied
-    ///      to subsequent `lockAndSend` / `burnAndSend` calls. Setting all fields to zero disables
-    ///      the controls for the token.
+    /// @notice Configure per-token anti-spam controls.
+    /// @dev Only callable by `ADMIN_ROLE` (BridgeAgency). The four fields are stored verbatim and
+    ///      applied independently:
+    ///        - `minCrossOutAmount` is enforced source-side by `lockAndSend` / `burnAndSend`.
+    ///        - `feeBps / feeMin / feeMax` are applied destination-side inside
+    ///          `executeRemoteMessages`, splitting the inbound `amount` between the recipient and
+    ///          the EL-injected `feeRecipient` (the block proposer's withdrawal address).
+    ///      Setting all fields to zero disables the controls for the token.
     /// @param token Token to configure (any registered local token, regardless of mode).
     /// @param minCrossOutAmount Reject `lockAndSend` / `burnAndSend` whose `amount` is strictly less.
-    /// @param feeBps Basis-points fee on `amount`. Capped at `MAX_FEE_BPS` (2000 = 20%).
+    /// @param feeBps Basis-points fee on inbound `amount`. Capped at `MAX_FEE_BPS` (2000 = 20%).
     /// @param feeMin Floor on the computed fee (acts as a flat minimum). Must be `<= feeMax`.
     /// @param feeMax Cap on the computed fee. Must be `>= feeMin`.
-    /// @param feeRecipient Where collected fees go. If `address(0)`, fees stay in the bridge for
-    ///        LockRelease tokens, or are burned alongside the cross-out amount for MintBurn tokens.
     function setSpamControl(
         address token,
         uint256 minCrossOutAmount,
         uint16 feeBps,
         uint256 feeMin,
-        uint256 feeMax,
-        address feeRecipient
+        uint256 feeMax
     ) external;
 
     // ============= Views =============
@@ -199,15 +210,11 @@ interface IBridge {
     function pendingMessage(uint64 srcCID, uint64 nonce) external view returns (InboundMessage memory);
 
     /// @notice Read the configured anti-spam controls for `token`.
-    /// @return minCrossOutAmount Minimum acceptable amount.
-    /// @return feeBps Basis-points fee.
-    /// @return feeMin Lower clamp on the computed fee.
-    /// @return feeMax Upper clamp on the computed fee.
-    /// @return feeRecipient Fee destination (zero = stay-in-bridge / burn).
+    /// @return minCrossOutAmount Source-side minimum acceptable amount.
+    /// @return feeBps Destination-side basis-points fee.
+    /// @return feeMin Destination-side floor on the computed fee.
+    /// @return feeMax Destination-side cap on the computed fee.
     function spamControl(
         address token
-    )
-        external
-        view
-        returns (uint256 minCrossOutAmount, uint16 feeBps, uint256 feeMin, uint256 feeMax, address feeRecipient);
+    ) external view returns (uint256 minCrossOutAmount, uint16 feeBps, uint256 feeMin, uint256 feeMax);
 }

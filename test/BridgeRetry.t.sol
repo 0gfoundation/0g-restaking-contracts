@@ -115,7 +115,7 @@ contract BridgeRetryTest is BridgeBaseTest {
         address random = makeAddr("random");
 
         vm.expectEmit(true, false, false, true, address(bridge));
-        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, 5 ether);
+        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, 5 ether, address(0), 0);
         vm.expectEmit(true, false, false, true, address(bridge));
         emit IBridge.BridgeMessageRetried(SRC_CID, 1, true);
         vm.prank(random);

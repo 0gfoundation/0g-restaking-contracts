@@ -87,19 +87,21 @@ contract BridgeAgency is Initializable, OwnableUpgradeable {
         IBridge($.bridge).configureToken(localToken, false, mode);
     }
 
-    /// @notice Configure per-token anti-spam controls (minimum amount + per-tx fee).
-    /// @dev Routes to `Bridge.setSpamControl`. Bridge enforces `feeBps <= MAX_FEE_BPS` (2000) and
-    ///      `feeMin <= feeMax`; setting all fields to zero disables the controls for `token`.
+    /// @notice Configure per-token anti-spam controls.
+    /// @dev Routes to `Bridge.setSpamControl`. `minCrossOutAmount` is the source-side floor
+    ///      enforced by `lockAndSend` / `burnAndSend`; `feeBps / feeMin / feeMax` configure the
+    ///      destination-side fee that `executeRemoteMessages` pays out of the inbound amount to
+    ///      the EL-injected proposer fee recipient. Bridge enforces `feeBps <= MAX_FEE_BPS` (2000)
+    ///      and `feeMin <= feeMax`; setting all fields to zero disables the controls for `token`.
     function setSpamControl(
         address token,
         uint256 minCrossOutAmount,
         uint16 feeBps,
         uint256 feeMin,
-        uint256 feeMax,
-        address feeRecipient
+        uint256 feeMax
     ) external onlyOwner {
         AgencyStorage storage $ = _getAgencyStorage();
-        IBridge($.bridge).setSpamControl(token, minCrossOutAmount, feeBps, feeMin, feeMax, feeRecipient);
+        IBridge($.bridge).setSpamControl(token, minCrossOutAmount, feeBps, feeMin, feeMax);
     }
 
     // ============= Views =============

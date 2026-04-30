@@ -107,7 +107,9 @@ contract BridgeBaseTest is Test {
         agency.mapRemote(t, DST_CID, remote);
     }
 
-    /// @dev Build a single InboundMessage (helper for system-call tests).
+    /// @dev Build a single InboundMessage with `feeRecipient = address(0)` (no fee paid out).
+    ///      Convenience overload for system-call tests that don't exercise the fee-distribution
+    ///      path. Tests that do should call `_msgWithFee` directly.
     function _msg(
         uint64 srcCID,
         uint64 nonce,
@@ -115,12 +117,26 @@ contract BridgeBaseTest is Test {
         address recipient,
         uint256 amount
     ) internal pure returns (IBridge.InboundMessage memory) {
+        return _msgWithFee(srcCID, nonce, localToken, recipient, amount, address(0));
+    }
+
+    /// @dev Build a single InboundMessage with an explicit `feeRecipient` (proposer withdrawal
+    ///      address in production; injected by the EL system-call dispatcher).
+    function _msgWithFee(
+        uint64 srcCID,
+        uint64 nonce,
+        address localToken,
+        address recipient,
+        uint256 amount,
+        address feeRecipient
+    ) internal pure returns (IBridge.InboundMessage memory) {
         return IBridge.InboundMessage({
             srcChainID: srcCID,
             nonce: nonce,
             localToken: localToken,
             recipient: recipient,
-            amount: amount
+            amount: amount,
+            feeRecipient: feeRecipient
         });
     }
 }

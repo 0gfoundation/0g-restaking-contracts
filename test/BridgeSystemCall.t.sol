@@ -11,10 +11,20 @@ import {BridgeBaseTest} from "./BridgeBase.t.sol";
 import {Token} from "./mocks/Token.sol";
 
 /// @notice Covers `executeRemoteMessages`: caller restriction, multi-msg batching, replay, per-msg
-///         try/catch failure isolation, and inboundConsumed semantics.
+///         try/catch failure isolation, `inboundConsumed` semantics, and the destination-side
+///         fee distribution that splits inbound `amount` between `recipient` and the EL-injected
+///         `feeRecipient`.
 contract BridgeSystemCallTest is BridgeBaseTest {
     address constant SYSTEM = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
     uint64 constant SRC_CID = 99;
+
+    /// @dev Stand-in for the EL-injected proposer withdrawal address.
+    address internal proposer;
+
+    function setUp() public override {
+        super.setUp();
+        proposer = makeAddr("proposer");
+    }
 
     function test_executeRemoteMessages_revertsIfNotSystem() public {
         IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
@@ -29,7 +39,7 @@ contract BridgeSystemCallTest is BridgeBaseTest {
         msgs[0] = _msg(SRC_CID, 1, address(token), bob, 5 ether);
 
         vm.expectEmit(true, false, false, true, address(bridge));
-        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, 5 ether);
+        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, 5 ether, address(0), 0);
         vm.prank(SYSTEM);
         bridge.executeRemoteMessages(msgs);
 
@@ -132,5 +142,122 @@ contract BridgeSystemCallTest is BridgeBaseTest {
         assertFalse(bridge.inboundConsumed(SRC_CID, 2));
         assertTrue(bridge.inboundConsumed(SRC_CID, 3));
         assertEq(bridge.pendingMessage(SRC_CID, 2).amount, 2 ether);
+    }
+
+    // -------------- destination-side fee distribution --------------
+
+    function test_executeRemoteMessages_appliesFeeAndPaysToFeeRecipient_mintBurn() public {
+        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
+        // Destination-side: 1% fee, no clamps active for this magnitude.
+        agency.setSpamControl(address(token), 0, 100, 0, type(uint256).max);
+
+        uint256 amount = 100 ether;
+        uint256 expectedFee = (amount * 100) / 10_000; // 1 ether
+        uint256 toRecipient = amount - expectedFee;
+
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
+        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, amount, proposer);
+
+        vm.expectEmit(true, false, false, true, address(bridge));
+        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, toRecipient, proposer, expectedFee);
+        vm.prank(SYSTEM);
+        bridge.executeRemoteMessages(msgs);
+
+        assertEq(token.balanceOf(bob), toRecipient, "recipient gets amount minus fee");
+        assertEq(token.balanceOf(proposer), expectedFee, "proposer gets fee");
+        assertEq(token.totalSupply(), amount, "total minted == inbound amount");
+        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
+    }
+
+    function test_executeRemoteMessages_appliesFeeAndPaysToFeeRecipient_lockRelease() public {
+        Token token = new Token("LR");
+        token.transfer(address(bridge), 1000 ether);
+        agency.addToken(address(token), IBridge.BridgeMode.LockRelease);
+        // Destination-side: 2% fee, no clamps active for this magnitude.
+        agency.setSpamControl(address(token), 0, 200, 0, type(uint256).max);
+
+        uint256 amount = 50 ether;
+        uint256 expectedFee = (amount * 200) / 10_000; // 1 ether
+        uint256 toRecipient = amount - expectedFee;
+
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
+        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, amount, proposer);
+
+        vm.expectEmit(true, false, false, true, address(bridge));
+        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, toRecipient, proposer, expectedFee);
+        vm.prank(SYSTEM);
+        bridge.executeRemoteMessages(msgs);
+
+        assertEq(token.balanceOf(bob), toRecipient);
+        assertEq(token.balanceOf(proposer), expectedFee);
+        // Bridge balance dropped by full `amount` (recipient + fee both released from escrow).
+        assertEq(token.balanceOf(address(bridge)), 1000 ether - amount);
+        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
+    }
+
+    function test_executeRemoteMessages_skipsFeeWhenZero() public {
+        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
+        // No spam control configured → feeBps == 0 && feeMin == 0, fee path is a no-op.
+
+        uint256 amount = 7 ether;
+
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
+        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, amount, proposer);
+
+        vm.expectEmit(true, false, false, true, address(bridge));
+        // BridgeIn carries the full amount and feeRecipient=0 / fee=0 because the destination
+        // chose not to charge a fee for this token.
+        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, amount, address(0), 0);
+        vm.prank(SYSTEM);
+        bridge.executeRemoteMessages(msgs);
+
+        assertEq(token.balanceOf(bob), amount, "recipient gets full amount");
+        assertEq(token.balanceOf(proposer), 0, "proposer gets nothing when feeBps=0");
+        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
+    }
+
+    function test_executeRemoteMessages_skipsFeeWhenFeeRecipientZero() public {
+        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
+        // Destination configured a 1% fee, but inbound message has feeRecipient = 0x0
+        // (theoretical edge case — shouldn't happen in production because EL always injects
+        // a non-zero coinbase post-MinerReward fork).
+        agency.setSpamControl(address(token), 0, 100, 0, type(uint256).max);
+
+        uint256 amount = 10 ether;
+
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
+        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, amount, address(0));
+
+        vm.expectEmit(true, false, false, true, address(bridge));
+        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, amount, address(0), 0);
+        vm.prank(SYSTEM);
+        bridge.executeRemoteMessages(msgs);
+
+        // Recipient gets the full amount; no tokens minted to the zero address.
+        assertEq(token.balanceOf(bob), amount);
+        assertEq(token.totalSupply(), amount, "no fee leg minted");
+        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
+    }
+
+    function test_executeRemoteMessages_clampsFeeAtMinAndMax() public {
+        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
+        // 0.10% bps with a 1 ether floor and a 5 ether ceiling.
+        agency.setSpamControl(address(token), 0, 10, 1 ether, 5 ether);
+
+        // Tiny inbound: raw bps fee = 10 * 10/10_000 = 0.01 ether → clamps up to floor (1 ether).
+        IBridge.InboundMessage[] memory smallMsg = new IBridge.InboundMessage[](1);
+        smallMsg[0] = _msgWithFee(SRC_CID, 1, address(token), alice, 10 ether, proposer);
+        vm.prank(SYSTEM);
+        bridge.executeRemoteMessages(smallMsg);
+        assertEq(token.balanceOf(alice), 9 ether, "small: amount - 1 ether floor");
+        assertEq(token.balanceOf(proposer), 1 ether, "small: floor applied");
+
+        // Huge inbound: raw bps fee = 10_000 * 10/10_000 = 10 ether → clamps down to ceiling (5 ether).
+        IBridge.InboundMessage[] memory bigMsg = new IBridge.InboundMessage[](1);
+        bigMsg[0] = _msgWithFee(SRC_CID, 2, address(token), bob, 10_000 ether, proposer);
+        vm.prank(SYSTEM);
+        bridge.executeRemoteMessages(bigMsg);
+        assertEq(token.balanceOf(bob), 10_000 ether - 5 ether, "big: amount - 5 ether ceiling");
+        assertEq(token.balanceOf(proposer), 1 ether + 5 ether, "big: ceiling applied (cumulative)");
     }
 }
