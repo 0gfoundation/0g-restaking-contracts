@@ -91,7 +91,7 @@ contract BridgeAgency is Initializable, OwnableUpgradeable {
     /// @dev Routes to `Bridge.setSpamControl`. `minCrossOutAmount` is the source-side floor
     ///      enforced by `lockAndSend` / `burnAndSend`; `feeBps / feeMin / feeMax` configure the
     ///      destination-side fee that `executeRemoteMessages` pays out of the inbound amount to
-    ///      the EL-injected proposer fee recipient. Bridge enforces `feeBps <= MAX_FEE_BPS` (2000)
+    ///      the EL-injected proposer fee recipient. Bridge enforces `feeBps <= MAX_FEE_BPS` (10000)
     ///      and `feeMin <= feeMax`; setting all fields to zero disables the controls for `token`.
     function setSpamControl(
         address token,

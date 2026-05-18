@@ -57,7 +57,7 @@ interface IBridge {
     /// @dev User-path call's `amount` is below the configured `minCrossOutAmount` for the token.
     error AmountTooSmall();
 
-    /// @dev `setSpamControl` called with `feeBps` exceeding `MAX_FEE_BPS` (20%).
+    /// @dev `setSpamControl` called with `feeBps` exceeding `MAX_FEE_BPS` (100%).
     error FeeBpsTooHigh();
 
     /// @dev Destination-side computed (and clamped) fee is greater than or equal to the inbound
@@ -185,7 +185,7 @@ interface IBridge {
     ///      Setting all fields to zero disables the controls for the token.
     /// @param token Token to configure (any registered local token, regardless of mode).
     /// @param minCrossOutAmount Reject `lockAndSend` / `burnAndSend` whose `amount` is strictly less.
-    /// @param feeBps Basis-points fee on inbound `amount`. Capped at `MAX_FEE_BPS` (2000 = 20%).
+    /// @param feeBps Basis-points fee on inbound `amount`. Capped at `MAX_FEE_BPS` (10000 = 100%).
     /// @param feeMin Floor on the computed fee (acts as a flat minimum). Must be `<= feeMax`.
     /// @param feeMax Cap on the computed fee. Must be `>= feeMin`.
     function setSpamControl(

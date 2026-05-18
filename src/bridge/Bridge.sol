@@ -53,9 +53,9 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     ///      and grants meta-authority over role assignments.
     bytes32 public constant ADMIN_ROLE = keccak256("BRIDGE_ADMIN_ROLE");
 
-    /// @notice Hard cap on `feeBps` accepted by `setSpamControl`. 2000 = 20%.
+    /// @notice Hard cap on `feeBps` accepted by `setSpamControl`. 10000 = 100%.
     /// @dev Documented in plan §1.5.4 — protects users against a misconfigured agency.
-    uint16 public constant MAX_FEE_BPS = 2000;
+    uint16 public constant MAX_FEE_BPS = 10000;
 
     /// @notice Per-token bridge configuration. Schema-frozen (only enabled flag + mode).
     struct TokenConfig {
