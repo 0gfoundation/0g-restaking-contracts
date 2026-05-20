@@ -28,7 +28,7 @@ contract BridgeAgencyTest is BridgeBaseTest {
     function test_deployAndAddBridgeToken_onlyOwner() public {
         vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, alice));
         vm.prank(alice);
-        agency.deployAndAddBridgeToken("X", "X");
+        agency.deployAndAddBridgeToken("X", "X", bytes32(0));
     }
 
     function test_mapRemote_onlyOwner() public {
@@ -46,7 +46,7 @@ contract BridgeAgencyTest is BridgeBaseTest {
     }
 
     function test_deployAndAddBridgeToken_grantsMinterRole() public {
-        address t = agency.deployAndAddBridgeToken("Sat USDT", "satUSDT");
+        address t = agency.deployAndAddBridgeToken("Sat USDT", "satUSDT", bytes32(0));
         BridgeERC20 token = BridgeERC20(t);
 
         assertTrue(token.hasRole(token.MINTER_ROLE(), address(bridge)));
@@ -66,7 +66,7 @@ contract BridgeAgencyTest is BridgeBaseTest {
     }
 
     function test_deployAndAddBridgeToken_registersAsMintBurn() public {
-        address t = agency.deployAndAddBridgeToken("Sat", "S");
+        address t = agency.deployAndAddBridgeToken("Sat", "S", bytes32(0));
         (bool enabled, IBridge.BridgeMode mode) = bridge.tokenConfig(t);
         assertTrue(enabled);
         assertEq(uint8(mode), uint8(IBridge.BridgeMode.MintBurn));
@@ -116,5 +116,37 @@ contract BridgeAgencyTest is BridgeBaseTest {
         bytes memory init = abi.encodeCall(BridgeAgency.initialize, (address(bridge), address(0), owner));
         vm.expectRevert(IBridge.ZeroAddress.selector);
         new BeaconProxy(address(beacon), init);
+    }
+
+    // ============= CREATE2 determinism =============
+
+    /// Same `(name, symbol, salt)` on a Bridge deployed at a known address always lands the
+    /// resulting BridgeERC20 at the CREATE2-predicted address. Two chains that share the same
+    /// Bridge + BridgeERC20Beacon addresses (via Nick-method genesis deployment) will therefore
+    /// produce the same token address — the cross-chain consistency property we want.
+    function test_deployAndAddBridgeToken_addressIsDeterministic() public {
+        bytes32 salt = bytes32(uint256(0x42));
+        bytes memory init = abi.encodeCall(BridgeERC20.initialize, ("Det", "DET", address(bridge)));
+        bytes memory initCode = abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(bridgeERC20Beacon, init));
+        address predicted = vm.computeCreate2Address(salt, keccak256(initCode), address(bridge));
+
+        address actual = agency.deployAndAddBridgeToken("Det", "DET", salt);
+        assertEq(actual, predicted, "deployed address must equal CREATE2 prediction");
+    }
+
+    /// Different salts with otherwise identical parameters land at different addresses.
+    function test_deployAndAddBridgeToken_differentSaltsGiveDifferentAddresses() public {
+        address a = agency.deployAndAddBridgeToken("Same", "SAME", bytes32(uint256(1)));
+        address b = agency.deployAndAddBridgeToken("Same", "SAME", bytes32(uint256(2)));
+        assertTrue(a != b, "different salts must produce different addresses");
+    }
+
+    /// Re-deploying with the same `(name, symbol, salt)` on the same chain hits the CREATE2
+    /// "address already taken" rule and reverts.
+    function test_deployAndAddBridgeToken_collisionReverts() public {
+        bytes32 salt = bytes32(uint256(0xCAFE));
+        agency.deployAndAddBridgeToken("Col", "COL", salt);
+        vm.expectRevert();
+        agency.deployAndAddBridgeToken("Col", "COL", salt);
     }
 }

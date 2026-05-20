@@ -52,8 +52,11 @@ contract BridgeScript is Script, JsonUtils {
         // Hard guard: the three DEPLOYER_*_KEY constants below are well-known test keys. Running
         // this script against a production chain would either (a) fail because the squatted nonces
         // give address mismatches, or — worse — (b) succeed and produce contracts at addresses an
-        // attacker also controls because they hold the matching key. Use Nick-method
-        // (`getRawTxs()`) for prod chains; see CLAUDE.md §"Bridge: Nick-method raw tx requirement".
+        // attacker also controls because they hold the matching key. Prod chains must instead
+        // deploy via Nick-method raw txs (`getRawTxs()` below) — legacy (pre-EIP-155) txs signed
+        // with a fixed `(r, s)` pair so the senders derive via `ecrecover` to addresses whose
+        // private keys nobody holds, preventing attackers from preempting nonce 0/1/2 with their
+        // own bytecode.
         require(
             block.chainid != 1 && block.chainid != 17_000 && block.chainid != 11_155_111,
             "Bridge.s.sol: prod chains must use Nick-method via getRawTxs(), not test keys"
@@ -176,10 +179,13 @@ contract BridgeScript is Script, JsonUtils {
     }
 
     /// @notice Stub for future Nick-method raw-tx export.
-    /// @dev Stream A will replace this with code that emits the eight signed legacy txs as hex
-    ///      strings, ready for chain-spec genesis tooling to broadcast. See Bridge.s.sol header
-    ///      and CLAUDE.md §"Bridge: Nick-method raw tx requirement" for the full design.
+    /// @dev To be replaced with code that emits the eight signed legacy (pre-EIP-155) txs as hex
+    ///      strings, ready for chain-spec genesis tooling to broadcast. Each tx is signed with a
+    ///      fixed `(r, s)` pair so the sender derives via `ecrecover` to an address whose private
+    ///      key nobody holds (Nick-method keyless deployment); these sender addresses get
+    ///      pre-allocated gas in genesis so the txs can land at the expected nonce 0/1/2 slots
+    ///      and produce deterministic, attacker-unspoofable contract addresses across chains.
     function getRawTxs() external pure returns (bytes[] memory) {
-        revert("BridgeScript: Nick-method TODO -- see Bridge.s.sol header and CLAUDE.md");
+        revert("BridgeScript: Nick-method raw-tx export not yet implemented");
     }
 }

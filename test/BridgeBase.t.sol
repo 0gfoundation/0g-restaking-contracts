@@ -35,7 +35,7 @@ contract BridgeBaseTest is Test {
     UpgradeableBeacon internal bridgeERC20Beacon;
 
     /// @dev This chain's chainID under test. Set via `vm.chainId(...)` in setUp so that
-    ///      `Bridge.localChainID()` (which now reads `block.chainid` directly) returns this value.
+    ///      emitted `BridgeOut` events carry this value as `srcChainID`.
     uint64 internal constant LOCAL_CID = 1;
     /// @dev Default destination chainID used in user-path tests.
     uint64 internal constant DST_CID = 2;
@@ -45,8 +45,7 @@ contract BridgeBaseTest is Test {
         alice = makeAddr("alice");
         bob = makeAddr("bob");
 
-        // Pin block.chainid so that Bridge.localChainID() and emitted BridgeOut events carry the
-        // same value tests assert against.
+        // Pin block.chainid so emitted BridgeOut events carry the same value tests assert against.
         vm.chainId(LOCAL_CID);
 
         // BridgeERC20 beacon (impl + beacon, no proxy — proxies are deployed per-token at runtime).
@@ -97,11 +96,14 @@ contract BridgeBaseTest is Test {
     }
 
     /// @dev Deploy a fresh BridgeERC20 via the agency, register as MintBurn, and map remote.
+    ///      The CREATE2 salt is derived from `(name, symbol)` so test cases that use distinct
+    ///      `(name, symbol)` pairs get distinct addresses without callers having to manage salts.
     function _deployMintBurnToken(
         string memory name,
         string memory symbol
     ) internal returns (BridgeERC20 token, address remote) {
-        address t = agency.deployAndAddBridgeToken(name, symbol);
+        bytes32 salt = keccak256(abi.encode(name, symbol));
+        address t = agency.deployAndAddBridgeToken(name, symbol, salt);
         token = BridgeERC20(t);
         remote = makeAddr(string.concat("remote-", symbol));
         agency.mapRemote(t, DST_CID, remote);

@@ -111,15 +111,15 @@ contract BridgeSpamControlTest is BridgeBaseTest {
     function test_setSpamControl_rejectsFeeBpsAbove10000() public {
         (Token token,) = _setupLR(100 ether);
         vm.expectRevert(IBridge.FeeBpsTooHigh.selector);
-        agency.setSpamControl(address(token), 0, 10001, 0, type(uint256).max);
+        agency.setSpamControl(address(token), 0, 10_001, 0, type(uint256).max);
     }
 
     function test_setSpamControl_acceptsFeeBpsAt10000Cap() public {
         (Token token,) = _setupLR(100 ether);
         // Boundary: exactly the cap is allowed.
-        agency.setSpamControl(address(token), 0, 10000, 0, type(uint256).max);
+        agency.setSpamControl(address(token), 0, 10_000, 0, type(uint256).max);
         (, uint16 storedBps,,) = bridge.spamControl(address(token));
-        assertEq(storedBps, 10000);
+        assertEq(storedBps, 10_000);
     }
 
     function test_setSpamControl_rejectsFeeMinGreaterThanFeeMax() public {
@@ -195,6 +195,6 @@ contract BridgeSpamControlTest is BridgeBaseTest {
     // -------------- MAX_FEE_BPS constant exposed --------------
 
     function test_maxFeeBpsConstant() public view {
-        assertEq(bridge.MAX_FEE_BPS(), 10000);
+        assertEq(bridge.MAX_FEE_BPS(), 10_000);
     }
 }

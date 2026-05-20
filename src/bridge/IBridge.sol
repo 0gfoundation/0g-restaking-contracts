@@ -23,11 +23,22 @@ interface IBridge {
     ///      destination-side fee logic in `executeRemoteMessages` splits `amount` between `recipient`
     ///      and `feeRecipient` according to the destination chain's `spamControl[localToken]` config.
     struct InboundMessage {
+        /// Source chain's `chainId` (the chain that emitted the originating `BridgeOut`).
         uint64 srcChainID;
+        /// Per-(srcCID, dstCID) outbound nonce assigned on the source chain. Monotonic; the CL
+        /// state-transition enforces sequential consumption (`nonce == lastNonce + 1`).
         uint64 nonce;
+        /// Token address on THIS (destination) chain. The CL poller resolves source-emitted
+        /// `remoteToken` to the local mapping before injecting into the SSZ message.
         address localToken;
+        /// Beneficiary on this chain. Receives `amount - fee` after the destination-side fee split.
         address recipient;
+        /// Full inbound amount before the destination-side fee split (i.e. what the source escrowed
+        /// or burned). The dest splits this into `(recipient: amount-fee, feeRecipient: fee)`.
         uint256 amount;
+        /// Destination block proposer's withdrawal address, EL-injected per block (equal to
+        /// `block.coinbase` post-MinerReward fork). All messages in a block share the same value.
+        /// `address(0)` means "skip fee distribution"; the full `amount` goes to `recipient`.
         address feeRecipient;
     }
 
@@ -67,10 +78,6 @@ interface IBridge {
 
     /// @dev `setSpamControl` called with `feeMin > feeMax`.
     error InvalidFeeBounds();
-
-    /// @dev `block.chainid` exceeds `type(uint64).max`. The schema pins `srcChainID` / `dstChainID`
-    ///      to u64 on the wire; this guards the narrowing cast in user paths.
-    error ChainIDOverflow();
 
     // ============= Events =============
 
@@ -158,10 +165,13 @@ interface IBridge {
     // ============= Self-call helper =============
 
     /// @notice Internal try/catch dispatch point, exposed externally for try/catch.
-    /// @dev Reverts unless `msg.sender == address(this)`.
+    /// @dev Reverts unless `msg.sender == address(this)`. Returns the destination-side split
+    ///      `(toRecipient, feeRecipient, fee)` so callers wrapping this in `try ... returns (...)`
+    ///      can emit `BridgeIn` without recomputing the split. When no fee leg is paid (no spam
+    ///      config or `m.feeRecipient == 0x0`), `feeRecipient` is `address(0)` and `fee` is 0.
     function executeOneInternal(
         InboundMessage calldata m
-    ) external;
+    ) external returns (uint256 toRecipient, address feeRecipient, uint256 fee);
 
     // ============= Admin (ADMIN_ROLE held by BridgeAgency) =============
 
@@ -172,8 +182,18 @@ interface IBridge {
     function mapRemoteToken(address localToken, uint64 dstCID, address remoteToken_) external;
 
     /// @notice Deploy a new `BridgeERC20` BeaconProxy off the shared `BridgeERC20Beacon`.
+    /// @dev Uses CREATE2 with the caller-supplied `salt`. Two chains that share the same
+    ///      Bridge contract address (Nick-method genesis deployment) and BridgeERC20Beacon
+    ///      address will land the resulting BridgeERC20 at the same address when given the
+    ///      same `(name, symbol, salt)` — useful for keeping a bridged token at the same
+    ///      address everywhere it's deployed. Reverts if a contract already exists at the
+    ///      target address (same `(name, symbol, salt)` used twice on the same chain).
     /// @return localToken Address of the newly deployed BridgeERC20.
-    function deployBridgeERC20(string memory name, string memory symbol) external returns (address localToken);
+    function deployBridgeERC20(
+        string memory name,
+        string memory symbol,
+        bytes32 salt
+    ) external returns (address localToken);
 
     /// @notice Configure per-token anti-spam controls.
     /// @dev Only callable by `ADMIN_ROLE` (BridgeAgency). The four fields are stored verbatim and
@@ -198,7 +218,6 @@ interface IBridge {
 
     // ============= Views =============
 
-    function localChainID() external view returns (uint64);
     function tokenConfig(
         address localToken
     ) external view returns (bool enabled, BridgeMode mode);

@@ -130,10 +130,6 @@ contract BridgeUserPathsTest is BridgeBaseTest {
         bridge.burnAndSend(address(token), DST_CID, bob, 0);
     }
 
-    function test_localChainID() public view {
-        assertEq(bridge.localChainID(), LOCAL_CID);
-    }
-
     function test_tokenConfig_view() public {
         (Token token,) = _deployLockReleaseToken(alice, 100 ether);
         (bool enabled, IBridge.BridgeMode mode) = bridge.tokenConfig(address(token));

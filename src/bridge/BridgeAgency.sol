@@ -20,7 +20,10 @@ import {IBridge} from "./IBridge.sol";
 contract BridgeAgency is Initializable, OwnableUpgradeable {
     /// @custom:storage-location erc7201:0g.bridge.BridgeAgency
     struct AgencyStorage {
+        /// Bridge proxy this agency administers. Set once at init; all admin setters route through it.
         address bridge;
+        /// Shared `UpgradeableBeacon` used by `deployAndAddBridgeToken` to deploy new
+        /// BridgeERC20 BeaconProxy instances. Matches `Bridge.bridgeERC20Beacon`.
         address bridgeERC20Beacon;
     }
 
@@ -57,13 +60,18 @@ contract BridgeAgency is Initializable, OwnableUpgradeable {
     }
 
     /// @notice Deploy a new BridgeERC20 BeaconProxy and register it as MintBurn in one tx.
+    /// @dev Uses CREATE2 via `Bridge.deployBridgeERC20`. Operators on multiple chains who want
+    ///      the same bridged token to land at the same address must pass identical `(name,
+    ///      symbol, salt)` and operate on chains where Bridge + BridgeERC20Beacon already share
+    ///      addresses (the case under the Nick-method genesis deployment).
     /// @return localToken Address of the newly deployed BridgeERC20.
     function deployAndAddBridgeToken(
         string memory name,
-        string memory symbol
+        string memory symbol,
+        bytes32 salt
     ) external onlyOwner returns (address localToken) {
         AgencyStorage storage $ = _getAgencyStorage();
-        localToken = IBridge($.bridge).deployBridgeERC20(name, symbol);
+        localToken = IBridge($.bridge).deployBridgeERC20(name, symbol, salt);
         IBridge($.bridge).configureToken(localToken, true, IBridge.BridgeMode.MintBurn);
     }
 

@@ -43,8 +43,9 @@ contract BridgeProxyUpgradeTest is BridgeBaseTest {
         (bool ok, bytes memory ret) = address(bridge).staticcall(abi.encodeWithSignature("version()"));
         assertTrue(ok);
         assertEq(abi.decode(ret, (uint256)), 2);
-        // existing storage preserved
-        assertEq(bridge.localChainID(), LOCAL_CID);
+        // Existing storage preserved across the upgrade — re-read agency to confirm the storage
+        // namespace survives the impl swap.
+        assertEq(bridge.agency(), address(agency));
     }
 
     function test_agencyBeacon_upgradeTo() public {
@@ -59,9 +60,9 @@ contract BridgeProxyUpgradeTest is BridgeBaseTest {
 
     function test_bridgeERC20Beacon_upgradeAffectsAllInstances() public {
         // Deploy 3 BridgeERC20 instances via the agency.
-        address t1 = agency.deployAndAddBridgeToken("A", "A");
-        address t2 = agency.deployAndAddBridgeToken("B", "B");
-        address t3 = agency.deployAndAddBridgeToken("C", "C");
+        address t1 = agency.deployAndAddBridgeToken("A", "A", bytes32(uint256(1)));
+        address t2 = agency.deployAndAddBridgeToken("B", "B", bytes32(uint256(2)));
+        address t3 = agency.deployAndAddBridgeToken("C", "C", bytes32(uint256(3)));
 
         // Pre-upgrade: version() doesn't exist on the V1 impl — calling fails.
         (bool ok,) = t1.staticcall(abi.encodeWithSignature("version()"));
