@@ -37,8 +37,10 @@ contract W0gIntegrationTest is BridgeBaseTest {
         w0g = new MockWrappedA0GI(address(precompile));
         require(address(w0g) == predictedW0G, "predicted address mismatch");
 
-        // Grant MintBurn registration for W0G in the bridge.
+        // Grant MintBurn registration for W0G in the bridge, and map a destination remote so
+        // burnAndSend won't be blocked by RemoteTokenNotMapped.
         agency.addToken(address(w0g), IBridge.BridgeMode.MintBurn);
+        agency.mapRemote(address(w0g), DST_CID, makeAddr("remoteW0G"));
     }
 
     /// @dev W0G_AGENCY grants the bridge a per-minter cap.

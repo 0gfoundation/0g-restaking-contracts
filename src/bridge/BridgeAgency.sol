@@ -18,6 +18,11 @@ import {IBridge} from "./IBridge.sol";
  *      orthogonal governance surfaces (W0G mint cap vs. Bridge token registry).
  */
 contract BridgeAgency is Initializable, OwnableUpgradeable {
+    /// @dev `disableToken` called against a token that is not currently enabled. Guards against
+    ///      operator typos that would otherwise write a disabled default-mode entry into Bridge
+    ///      storage for an unknown token.
+    error TokenNotEnabled();
+
     /// @custom:storage-location erc7201:0g.bridge.BridgeAgency
     struct AgencyStorage {
         /// Bridge proxy this agency administers. Set once at init; all admin setters route through it.
@@ -87,11 +92,15 @@ contract BridgeAgency is Initializable, OwnableUpgradeable {
     ///      reads the current mode from the Bridge and pass-throughs `configureToken(t, false, mode)`,
     ///      so toggling never accidentally re-registers an unknown token as a non-default mode.
     ///      To re-enable, call `addToken(token, mode)` again with the same mode.
+    ///      Reverts `TokenNotEnabled` if the token is not currently enabled — operator typo on
+    ///      `disableToken(<wrong address>)` would otherwise silently write a disabled default-mode
+    ///      entry into Bridge storage instead of failing loud.
     function disableToken(
         address localToken
     ) external onlyOwner {
         AgencyStorage storage $ = _getAgencyStorage();
-        (, IBridge.BridgeMode mode) = IBridge($.bridge).tokenConfig(localToken);
+        (bool enabled, IBridge.BridgeMode mode) = IBridge($.bridge).tokenConfig(localToken);
+        if (!enabled) revert TokenNotEnabled();
         IBridge($.bridge).configureToken(localToken, false, mode);
     }
 

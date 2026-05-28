@@ -161,21 +161,14 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         TokenConfig memory cfg = $.tokens[token];
         if (!cfg.enabled) revert TokenDisabled();
         if (cfg.mode != BridgeMode.LockRelease) revert WrongMode();
+        address remote = $.remoteToken[token][dstCID];
+        if (remote == address(0)) revert RemoteTokenNotMapped();
 
         _applyAntiSpam($, token, amount);
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         uint64 nonce = ++$.outboundNonce[dstCID];
-        emit BridgeOut(
-            uint64(block.chainid),
-            dstCID,
-            nonce,
-            token,
-            $.remoteToken[token][dstCID],
-            recipient,
-            amount,
-            uint8(cfg.mode)
-        );
+        emit BridgeOut(uint64(block.chainid), dstCID, nonce, token, remote, recipient, amount, uint8(cfg.mode));
     }
 
     /// @inheritdoc IBridge
@@ -193,22 +186,15 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         TokenConfig memory cfg = $.tokens[token];
         if (!cfg.enabled) revert TokenDisabled();
         if (cfg.mode != BridgeMode.MintBurn) revert WrongMode();
+        address remote = $.remoteToken[token][dstCID];
+        if (remote == address(0)) revert RemoteTokenNotMapped();
 
         _applyAntiSpam($, token, amount);
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         IBurnable(token).burn(amount);
         uint64 nonce = ++$.outboundNonce[dstCID];
-        emit BridgeOut(
-            uint64(block.chainid),
-            dstCID,
-            nonce,
-            token,
-            $.remoteToken[token][dstCID],
-            recipient,
-            amount,
-            uint8(cfg.mode)
-        );
+        emit BridgeOut(uint64(block.chainid), dstCID, nonce, token, remote, recipient, amount, uint8(cfg.mode));
     }
 
     /// @dev Source-side anti-spam: reject inputs below the configured per-token minimum.
@@ -285,16 +271,9 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         if (msg.sender != address(this)) revert OnlySelf();
         BridgeStorage storage $ = _getBridgeStorage();
         TokenConfig memory cfg = $.tokens[m.localToken];
-        if (!cfg.enabled) {
-            // bubble up an ASCII reason that matches the schema's failure-reason convention.
-            assembly {
-                mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
-                mstore(0x04, 0x20) // string offset
-                mstore(0x24, 0x08) // length 8
-                mstore(0x44, "disabled")
-                revert(0x00, 0x64)
-            }
-        }
+        // Bubble up to the outer try/catch as `Error("disabled")` so BridgeMessageFailed.reason
+        // carries the ABI-encoded string downstream consumers (CL/EL, explorer) can decode.
+        if (!cfg.enabled) revert("disabled");
 
         TokenSpamControl memory s = $.spamControl[m.localToken];
         fee = _computeFee(m.amount, s);
@@ -352,7 +331,7 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
 
     /// @inheritdoc IBridge
     function mapRemoteToken(address localToken, uint64 dstCID, address remoteToken_) external onlyRole(ADMIN_ROLE) {
-        if (localToken == address(0)) revert ZeroAddress();
+        if (localToken == address(0) || remoteToken_ == address(0)) revert ZeroAddress();
         BridgeStorage storage $ = _getBridgeStorage();
         $.remoteToken[localToken][dstCID] = remoteToken_;
     }

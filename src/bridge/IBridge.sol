@@ -79,6 +79,14 @@ interface IBridge {
     /// @dev `setSpamControl` called with `feeMin > feeMax`.
     error InvalidFeeBounds();
 
+    /// @dev User path called against a `(token, dstCID)` pair with no remote-token mapping
+    ///      configured. Without the mapping, the emitted `BridgeOut.remoteToken` would be
+    ///      `address(0)`, the CL/EL would resolve the destination `localToken` to `address(0)`,
+    ///      and the destination message would be permanently non-deliverable (token 0 is always
+    ///      disabled and the stored pending entry can't be repaired by later configuring the
+    ///      source mapping). Reject upfront on the source side.
+    error RemoteTokenNotMapped();
+
     // ============= Events =============
 
     /// @notice Emitted on the source chain when a user initiates a bridge transfer.
@@ -121,7 +129,16 @@ interface IBridge {
     );
 
     /// @notice Emitted on the destination chain when a remote message fails or is a replay.
-    /// @param reason ASCII reason like "replay", "disabled", or the upstream revert bytes.
+    /// @param reason Failure reason. Three possible encodings depending on origin:
+    ///        - Replay (duplicate nonce already consumed): raw ASCII bytes `"replay"`, NO selector.
+    ///          This path emits directly without going through try/catch.
+    ///        - Disabled-token revert inside `executeOneInternal`: ABI-encoded `Error(string)` from
+    ///          `revert("disabled")` — selector `0x08c379a0` + offset + length + ASCII bytes.
+    ///        - Any other revert surfaced through try/catch: arbitrary revert bytes forwarded
+    ///          verbatim. Includes this contract's own custom errors such as
+    ///          `FeeExceedsAmount()` (4-byte selector with no args), as well as upstream
+    ///          token / precompile reverts which may be `Error(string)`, a custom-error
+    ///          4-byte selector + args, empty bytes, or anything else the failing callee emits.
     event BridgeMessageFailed(uint64 indexed srcChainID, uint64 nonce, bytes reason);
 
     /// @notice Emitted on the destination chain after `retry` is attempted.

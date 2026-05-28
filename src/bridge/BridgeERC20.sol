@@ -5,6 +5,8 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 
+import {IBridge} from "./IBridge.sol";
+
 /**
  * @title BridgeERC20
  * @notice Templated ERC-20 deployed once per MintBurn-mode token registered with the Bridge.
@@ -24,6 +26,7 @@ contract BridgeERC20 is Initializable, ERC20Upgradeable, AccessControlUpgradeabl
     /// @param symbol_ ERC-20 symbol.
     /// @param bridge The Bridge proxy address. Receives DEFAULT_ADMIN_ROLE and MINTER_ROLE.
     function initialize(string memory name_, string memory symbol_, address bridge) external initializer {
+        if (bridge == address(0)) revert IBridge.ZeroAddress();
         __ERC20_init(name_, symbol_);
         __AccessControl_init();
         _grantRole(DEFAULT_ADMIN_ROLE, bridge);

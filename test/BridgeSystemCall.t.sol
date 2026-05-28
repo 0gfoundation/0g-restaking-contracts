@@ -260,4 +260,54 @@ contract BridgeSystemCallTest is BridgeBaseTest {
         assertEq(token.balanceOf(bob), 10_000 ether - 5 ether, "big: amount - 5 ether ceiling");
         assertEq(token.balanceOf(proposer), 1 ether + 5 ether, "big: ceiling applied (cumulative)");
     }
+
+    /// @notice Protocol max-batch sanity check. The CL/EL budget caps `InboundMessage[]` at 64
+    ///         per block; verify the contract delivers a full 64-message batch without any
+    ///         per-message failures and that the post-state matches the per-message expected
+    ///         balances and `inboundConsumed` flags.
+    function test_executeRemoteMessages_maxBatchOf64() public {
+        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
+        uint256 batchSize = 64;
+
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](batchSize);
+        for (uint256 i = 0; i < batchSize; ++i) {
+            // nonces 1..64, alternating recipients alice / bob, amounts = (i+1) * 0.01 ether.
+            address to = (i % 2 == 0) ? alice : bob;
+            msgs[i] = _msg(SRC_CID, uint64(i + 1), address(token), to, (i + 1) * 0.01 ether);
+        }
+
+        vm.prank(SYSTEM);
+        bridge.executeRemoteMessages(msgs);
+
+        // Sum of (i+1)*0.01 for i in [0, 64) = (1+2+...+64) * 0.01 ether = 2080 * 0.01 = 20.8 ether.
+        // Even indices (0..62) → alice: sum of 1,3,5,...,63 multiplied by 0.01 = 1024 * 0.01 = 10.24 ether.
+        // Odd indices (1..63) → bob: sum of 2,4,6,...,64 multiplied by 0.01 = 1056 * 0.01 = 10.56 ether.
+        assertEq(token.balanceOf(alice), 10.24 ether, "alice cumulative");
+        assertEq(token.balanceOf(bob), 10.56 ether, "bob cumulative");
+        assertEq(token.totalSupply(), 20.8 ether, "supply = sum of all amounts");
+        for (uint64 n = 1; n <= 64; ++n) {
+            assertTrue(bridge.inboundConsumed(SRC_CID, n), "all nonces consumed");
+        }
+    }
+
+    /// @notice Partial fee config `(feeBps=X, feeMin=0, feeMax=0)` is intentionally treated as
+    ///         "fee disabled": _computeFee falls through the early-return (feeBps != 0), computes
+    ///         the raw bps fee, then clamps it down to feeMax==0 and returns 0. Pinning this so a
+    ///         future refactor that interprets feeMax=0 as "no cap" would loudly fail.
+    function test_executeRemoteMessages_feeBpsWithZeroFeeMax_yieldsZeroFee() public {
+        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
+        agency.setSpamControl(address(token), 0, 100, 0, 0);
+
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
+        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, 10 ether, proposer);
+
+        vm.expectEmit(true, false, false, true, address(bridge));
+        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, 10 ether, address(0), 0);
+        vm.prank(SYSTEM);
+        bridge.executeRemoteMessages(msgs);
+
+        assertEq(token.balanceOf(bob), 10 ether, "recipient gets full amount when feeMax=0 clamps fee to 0");
+        assertEq(token.balanceOf(proposer), 0, "proposer gets nothing when feeMax=0");
+        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
+    }
 }

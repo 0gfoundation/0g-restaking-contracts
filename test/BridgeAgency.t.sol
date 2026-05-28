@@ -149,4 +149,36 @@ contract BridgeAgencyTest is BridgeBaseTest {
         vm.expectRevert();
         agency.deployAndAddBridgeToken("Col", "COL", salt);
     }
+
+    // ============= BridgeERC20 init zero guard =============
+
+    /// @notice BridgeERC20.initialize must reject a zero bridge address. The production path
+    ///         passes Bridge.address(this), so this is consistency with the other two
+    ///         initializers' zero-address guards.
+    function test_bridgeERC20_initialize_revertsZeroBridge() public {
+        BridgeERC20 impl = new BridgeERC20();
+        UpgradeableBeacon beacon = new UpgradeableBeacon(address(impl), owner);
+        bytes memory init = abi.encodeCall(BridgeERC20.initialize, ("Tok", "TOK", address(0)));
+        vm.expectRevert(IBridge.ZeroAddress.selector);
+        new BeaconProxy(address(beacon), init);
+    }
+
+    // ============= disableToken guards =============
+
+    /// @notice disableToken on a token that was never added must revert, instead of silently
+    ///         writing a disabled default-mode entry into Bridge storage.
+    function test_disableToken_revertsIfUnknown() public {
+        address ghost = makeAddr("ghost");
+        vm.expectRevert(BridgeAgency.TokenNotEnabled.selector);
+        agency.disableToken(ghost);
+    }
+
+    /// @notice disableToken on an already-disabled token must revert (double-disable is a typo).
+    function test_disableToken_revertsIfAlreadyDisabled() public {
+        Token t = new Token("X");
+        agency.addToken(address(t), IBridge.BridgeMode.LockRelease);
+        agency.disableToken(address(t));
+        vm.expectRevert(BridgeAgency.TokenNotEnabled.selector);
+        agency.disableToken(address(t));
+    }
 }

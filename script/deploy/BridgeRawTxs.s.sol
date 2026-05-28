@@ -95,43 +95,33 @@ contract BridgeRawTxs is Script, JsonUtils {
         p.initCodes[0] = type(BridgeERC20).creationCode;
 
         // nonce 1: UpgradeableBeacon(impl=predicted[0], owner=OWNER)
-        p.initCodes[1] = abi.encodePacked(
-            type(UpgradeableBeacon).creationCode, abi.encode(p.predicted[0], owner)
-        );
+        p.initCodes[1] = abi.encodePacked(type(UpgradeableBeacon).creationCode, abi.encode(p.predicted[0], owner));
 
         // nonce 2: Bridge logic contract
         p.initCodes[2] = type(Bridge).creationCode;
 
         // nonce 3: UpgradeableBeacon(impl=predicted[2], owner=OWNER)
-        p.initCodes[3] = abi.encodePacked(
-            type(UpgradeableBeacon).creationCode, abi.encode(p.predicted[2], owner)
-        );
+        p.initCodes[3] = abi.encodePacked(type(UpgradeableBeacon).creationCode, abi.encode(p.predicted[2], owner));
 
         // nonce 4: BeaconProxy(beacon=predicted[3], data=Bridge.initialize(ERC20Beacon, AgencyProxy, admin))
         //          AgencyProxy is predicted[7] — works because CREATE address is sender+nonce only.
         bytes memory bridgeInitCall = abi.encodeCall(Bridge.initialize, (p.predicted[1], p.predicted[7], owner));
-        p.initCodes[4] = abi.encodePacked(
-            type(BeaconProxy).creationCode, abi.encode(p.predicted[3], bridgeInitCall)
-        );
+        p.initCodes[4] = abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(p.predicted[3], bridgeInitCall));
 
         // nonce 5: BridgeAgency logic contract
         p.initCodes[5] = type(BridgeAgency).creationCode;
 
         // nonce 6: UpgradeableBeacon(impl=predicted[5], owner=OWNER)
-        p.initCodes[6] = abi.encodePacked(
-            type(UpgradeableBeacon).creationCode, abi.encode(p.predicted[5], owner)
-        );
+        p.initCodes[6] = abi.encodePacked(type(UpgradeableBeacon).creationCode, abi.encode(p.predicted[5], owner));
 
         // nonce 7: BeaconProxy(beacon=predicted[6], data=BridgeAgency.initialize(BridgeProxy, ERC20Beacon, owner))
-        bytes memory agencyInitCall = abi.encodeCall(
-            BridgeAgency.initialize, (p.predicted[4], p.predicted[1], owner)
-        );
-        p.initCodes[7] = abi.encodePacked(
-            type(BeaconProxy).creationCode, abi.encode(p.predicted[6], agencyInitCall)
-        );
+        bytes memory agencyInitCall = abi.encodeCall(BridgeAgency.initialize, (p.predicted[4], p.predicted[1], owner));
+        p.initCodes[7] = abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(p.predicted[6], agencyInitCall));
     }
 
-    function _logPlan(Plan memory p) internal pure {
+    function _logPlan(
+        Plan memory p
+    ) internal pure {
         console2.log("=== Bridge raw-tx plan ===");
         console2.log("  deployer (fund this):", p.deployer);
         console2.log("  owner / admin       :", p.owner);
@@ -143,11 +133,11 @@ contract BridgeRawTxs is Script, JsonUtils {
         }
     }
 
-    function _signLegacyCreate(uint256 privKey, uint64 nonce, bytes memory initCode)
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function _signLegacyCreate(
+        uint256 privKey,
+        uint64 nonce,
+        bytes memory initCode
+    ) internal pure returns (bytes memory) {
         // Unsigned legacy tx for sighash: rlp([nonce, gasPrice, gasLimit, to="", value=0, data])
         // No chainId fields — pre-EIP-155 form so the signature carries no chain binding and the
         // signer recovers identically on every chain. Throwaway-key model gives us the same
@@ -209,7 +199,9 @@ contract BridgeRawTxs is Script, JsonUtils {
     // Minimal RLP encoder. Scope: encode unsigned/signed legacy txs.
     // ------------------------------------------------------------------
 
-    function _rlpUint(uint256 value) internal pure returns (bytes memory) {
+    function _rlpUint(
+        uint256 value
+    ) internal pure returns (bytes memory) {
         if (value == 0) {
             // RLP-canonical encoding of integer 0 is the empty byte string (0x80), NOT a
             // single zero byte. Foundry's RLP-decoders reject the latter as non-canonical.
@@ -228,7 +220,9 @@ contract BridgeRawTxs is Script, JsonUtils {
         return _rlpBytes(raw);
     }
 
-    function _rlpBytes(bytes memory data) internal pure returns (bytes memory) {
+    function _rlpBytes(
+        bytes memory data
+    ) internal pure returns (bytes memory) {
         uint256 len = data.length;
         if (len == 1 && uint8(data[0]) < 0x80) {
             // RLP shortcut: a single byte in [0x00, 0x7f] is its own encoding.
@@ -241,7 +235,9 @@ contract BridgeRawTxs is Script, JsonUtils {
         return abi.encodePacked(bytes1(uint8(0xb7 + lenBytes.length)), lenBytes, data);
     }
 
-    function _rlpList(bytes[] memory items) internal pure returns (bytes memory) {
+    function _rlpList(
+        bytes[] memory items
+    ) internal pure returns (bytes memory) {
         bytes memory body;
         for (uint256 i = 0; i < items.length; i++) {
             body = abi.encodePacked(body, items[i]);
@@ -254,7 +250,9 @@ contract BridgeRawTxs is Script, JsonUtils {
         return abi.encodePacked(bytes1(uint8(0xf7 + lenBytes.length)), lenBytes, body);
     }
 
-    function _toBigEndian(uint256 value) internal pure returns (bytes memory) {
+    function _toBigEndian(
+        uint256 value
+    ) internal pure returns (bytes memory) {
         if (value == 0) return new bytes(0);
         uint256 len = 0;
         uint256 tmp = value;

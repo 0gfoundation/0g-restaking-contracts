@@ -2,6 +2,7 @@
 pragma solidity 0.8.25;
 
 import {Test, console2} from "forge-std/Test.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
 import {Bridge} from "../src/bridge/Bridge.sol";
 import {BridgeERC20} from "../src/bridge/BridgeERC20.sol";
@@ -135,5 +136,81 @@ contract BridgeUserPathsTest is BridgeBaseTest {
         (bool enabled, IBridge.BridgeMode mode) = bridge.tokenConfig(address(token));
         assertTrue(enabled);
         assertEq(uint8(mode), uint8(IBridge.BridgeMode.LockRelease));
+    }
+
+    /// @notice Registering a LockRelease token but forgetting to map a remote must block
+    ///         lockAndSend on the source side. If we allowed it, the emitted
+    ///         BridgeOut.remoteToken would be address(0), the destination would resolve
+    ///         localToken=0, and the resulting pending message would be permanently
+    ///         non-deliverable (token 0 always disabled; pending storage can't be
+    ///         repaired by later configuring the source mapping).
+    function test_lockAndSend_revertsIfRemoteNotMapped() public {
+        Token token = new Token("MockLR");
+        token.transfer(alice, 100 ether);
+        agency.addToken(address(token), IBridge.BridgeMode.LockRelease);
+        // Note: agency.mapRemote NOT called.
+
+        vm.prank(alice);
+        token.approve(address(bridge), type(uint256).max);
+        vm.expectRevert(IBridge.RemoteTokenNotMapped.selector);
+        vm.prank(alice);
+        bridge.lockAndSend(address(token), DST_CID, bob, 1 ether);
+    }
+
+    /// @notice Same as the LockRelease case but for MintBurn — even more critical because the
+    ///         user's tokens would be burned (not just locked) before the message went pending.
+    function test_burnAndSend_revertsIfRemoteNotMapped() public {
+        bytes32 salt = keccak256("noMapping");
+        address t = agency.deployAndAddBridgeToken("X", "X", salt);
+        BridgeERC20 token = BridgeERC20(t);
+        // Note: agency.mapRemote NOT called.
+
+        vm.prank(address(bridge));
+        token.mint(alice, 1 ether);
+        vm.prank(alice);
+        token.approve(address(bridge), type(uint256).max);
+        vm.expectRevert(IBridge.RemoteTokenNotMapped.selector);
+        vm.prank(alice);
+        bridge.burnAndSend(address(token), DST_CID, bob, 1 ether);
+    }
+
+    /// @notice Source-side mapping setter must reject the zero remote address, so admins can't
+    ///         re-introduce the unmapped-remote footgun by configuring a mapping to 0.
+    function test_mapRemoteToken_revertsOnZeroRemote() public {
+        (Token token,) = _deployLockReleaseToken(alice, 100 ether);
+        vm.expectRevert(IBridge.ZeroAddress.selector);
+        agency.mapRemote(address(token), uint64(9), address(0));
+    }
+}
+
+/// @notice Covers the three Bridge admin setters that BridgeAgency proxies to. The agency-side
+///         ownership gating is exercised in BridgeAgency.t.sol; this class pins the underlying
+///         `ADMIN_ROLE` check on Bridge itself, so a future refactor that swapped ADMIN_ROLE
+///         for DEFAULT_ADMIN_ROLE on any of these would fail loudly.
+contract BridgeAdminEntrypointTest is BridgeBaseTest {
+    function test_configureToken_directBridgeCallRequiresAdminRole() public {
+        Token token = new Token("X");
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, bridge.ADMIN_ROLE())
+        );
+        vm.prank(alice);
+        bridge.configureToken(address(token), true, IBridge.BridgeMode.LockRelease);
+    }
+
+    function test_mapRemoteToken_directBridgeCallRequiresAdminRole() public {
+        Token token = new Token("X");
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, bridge.ADMIN_ROLE())
+        );
+        vm.prank(alice);
+        bridge.mapRemoteToken(address(token), uint64(7), makeAddr("remote"));
+    }
+
+    function test_deployBridgeERC20_directBridgeCallRequiresAdminRole() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, bridge.ADMIN_ROLE())
+        );
+        vm.prank(alice);
+        bridge.deployBridgeERC20("X", "X", bytes32(0));
     }
 }
