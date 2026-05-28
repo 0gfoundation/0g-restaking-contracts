@@ -20,6 +20,8 @@ deployments/**
 !deployments/ascend-16602.json
 !deployments/ascend-16661.json
 !deployments/satellite-example.json
+!deployments/bridge-raw-prod-0.json
+!deployments/bridge-raw-devnet-0.json
 
 # Dotenv file
 .env

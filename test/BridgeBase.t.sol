@@ -68,7 +68,8 @@ contract BridgeBaseTest is Test {
         address predictedAgency = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
 
         // owner doubles as both ADMIN_ROLE-via-agency caller and the DEFAULT_ADMIN_ROLE governance
-        // multisig in tests. Production deploy splits these (see Bridge.s.sol BRIDGE_ADMIN env).
+        // multisig in tests. Production deploy hardcodes both roles to the same OWNER address
+        // baked into the bridge raw-tx artifact (see BridgeRawTxs.s.sol).
         BeaconProxy bridgeProxy = new BeaconProxy(
             address(bridgeBeacon),
             abi.encodeCall(Bridge.initialize, (address(bridgeERC20Beacon), predictedAgency, owner))
