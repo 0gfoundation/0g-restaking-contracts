@@ -59,6 +59,28 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     ///         in `pendingMessages` for retry once admin rebalances spam config.
     uint16 public constant MAX_FEE_BPS = 10_000;
 
+    /// @notice Per-message gas ceiling for the batched `executeRemoteMessages` system call.
+    ///         Each inbound message is dispatched via `executeOneInternal{gas: PER_MESSAGE_GAS_CAP}`
+    ///         so one message can never drain the whole 30M system-call budget. This matters because
+    ///         a failing token call backed by a stateful precompile (e.g. W0G mint over its cap)
+    ///         returns a precompile *error* — which the EVM treats as an exceptional halt that
+    ///         consumes ALL gas forwarded to it, not a refunding revert. Without this ceiling, two
+    ///         such failures in one block would exhaust the 30M and revert the entire system call,
+    ///         leaving every message in the block neither delivered nor parked (the CL nonce
+    ///         watermark having already advanced) — i.e. unrecoverable. With the ceiling, each
+    ///         failure burns at most this much and lands in `pendingMessages` for retry.
+    ///
+    ///         Sizing: the most expensive *successful* message measured is a W0G MintBurn with a
+    ///         fee (two 100k precompile mints + overhead ≈ 268k); 400k leaves headroom for the
+    ///         63/64 call-forwarding haircut and cold-access variance. The block budget
+    ///         (MaxBridgeMessagesPerBlock = 48, enforced by the CL builder + EL decoder) is chosen
+    ///         so worst case 48 × (400k + ~140k struct-park + overhead) ≈ 26.4M < 30M.
+    ///
+    ///         NOTE: the cap is applied ONLY on the batched system-call path. `retry` is a
+    ///         user-funded single-message tx and forwards all available gas, so a message that
+    ///         genuinely needs more than this ceiling still has an uncapped recovery path.
+    uint256 public constant PER_MESSAGE_GAS_CAP = 400_000;
+
     /// @notice Per-token bridge configuration. Schema-frozen (only enabled flag + mode).
     struct TokenConfig {
         /// When false, both user paths and destination-side delivery revert. Disabling preserves
@@ -305,7 +327,11 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         InboundMessage calldata m
     ) internal {
         BridgeStorage storage $ = _getBridgeStorage();
-        try this.executeOneInternal(m) returns (uint256 toRecipient, address feeRecipient, uint256 fee) {
+        try this.executeOneInternal{gas: PER_MESSAGE_GAS_CAP}(m) returns (
+            uint256 toRecipient,
+            address feeRecipient,
+            uint256 fee
+        ) {
             $.inboundConsumed[m.srcChainID][m.nonce] = true;
             // Wipe any stale pending entry (defensive — should be impossible under CL nonce rules).
             if ($.hasPending[m.srcChainID][m.nonce]) {
