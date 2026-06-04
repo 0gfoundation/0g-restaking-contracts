@@ -122,6 +122,28 @@ contract BridgeSystemCallTest is BridgeBaseTest {
         assertEq(stored.amount, 5 ether);
     }
 
+    function test_executeRemoteMessages_feeExceedsAmountLandsInPending() public {
+        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
+        // 100% fee → computed fee == amount → _computeFee reverts FeeExceedsAmount, so the
+        // message must park in pending (no mint) rather than abort the whole system call.
+        agency.setSpamControl(address(token), 0, 10_000, 0, type(uint256).max);
+
+        uint256 amount = 5 ether;
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
+        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, amount, proposer);
+
+        vm.expectEmit(true, false, false, true, address(bridge));
+        emit IBridge.BridgeMessageFailed(SRC_CID, 1, abi.encodeWithSelector(IBridge.FeeExceedsAmount.selector));
+        vm.prank(SYSTEM);
+        bridge.executeRemoteMessages(msgs);
+
+        assertEq(token.balanceOf(bob), 0, "no mint to recipient while fee blocks it");
+        assertEq(token.balanceOf(proposer), 0, "no fee leg while blocked");
+        assertEq(token.totalSupply(), 0, "nothing minted");
+        assertFalse(bridge.inboundConsumed(SRC_CID, 1));
+        assertEq(bridge.pendingMessage(SRC_CID, 1).amount, amount, "parked for retry");
+    }
+
     function test_executeRemoteMessages_failureInMiddleOfBatchOthersSucceed() public {
         (BridgeERC20 a,) = _deployMintBurnToken("A", "A");
         (BridgeERC20 b,) = _deployMintBurnToken("B", "B");
@@ -142,6 +164,44 @@ contract BridgeSystemCallTest is BridgeBaseTest {
         assertFalse(bridge.inboundConsumed(SRC_CID, 2));
         assertTrue(bridge.inboundConsumed(SRC_CID, 3));
         assertEq(bridge.pendingMessage(SRC_CID, 2).amount, 2 ether);
+    }
+
+    /// @notice Two consecutive failing messages in ONE system-call batch must BOTH park (each
+    ///         `_tryDispatch` try/catch is independent). Isolates contract logic from any
+    ///         EL-side gas/precompile-revert interaction observed at integration time.
+    function test_executeRemoteMessages_twoConsecutiveFailuresBothPark() public {
+        (BridgeERC20 a,) = _deployMintBurnToken("A", "A");
+        (BridgeERC20 b,) = _deployMintBurnToken("B", "B");
+        agency.disableToken(address(a));
+        agency.disableToken(address(b));
+
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](3);
+        msgs[0] = _msg(SRC_CID, 1, address(a), alice, 1 ether); // fail
+        msgs[1] = _msg(SRC_CID, 2, address(b), alice, 2 ether); // fail (consecutive)
+        msgs[2] = _msg(SRC_CID, 3, address(a), bob, 3 ether); // fail
+
+        vm.prank(SYSTEM);
+        bridge.executeRemoteMessages(msgs);
+
+        // All three parked, none consumed, no tokens minted.
+        for (uint64 nonce = 1; nonce <= 3; ++nonce) {
+            assertFalse(bridge.inboundConsumed(SRC_CID, nonce), "must not consume a failed msg");
+        }
+        assertEq(bridge.pendingMessage(SRC_CID, 1).amount, 1 ether, "msg1 parked");
+        assertEq(bridge.pendingMessage(SRC_CID, 2).amount, 2 ether, "msg2 parked");
+        assertEq(bridge.pendingMessage(SRC_CID, 3).amount, 3 ether, "msg3 parked");
+        assertEq(a.totalSupply(), 0);
+        assertEq(b.totalSupply(), 0);
+
+        // And each is recoverable via retry once unblocked.
+        agency.addToken(address(a), IBridge.BridgeMode.MintBurn);
+        agency.addToken(address(b), IBridge.BridgeMode.MintBurn);
+        bridge.retry(SRC_CID, 1);
+        bridge.retry(SRC_CID, 2);
+        bridge.retry(SRC_CID, 3);
+        assertEq(a.balanceOf(alice), 1 ether);
+        assertEq(b.balanceOf(alice), 2 ether);
+        assertEq(a.balanceOf(bob), 3 ether);
     }
 
     // -------------- destination-side fee distribution --------------

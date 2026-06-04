@@ -182,6 +182,56 @@ contract BridgeRetryTest is BridgeBaseTest {
         assertEq(bridge.pendingMessage(SRC_CID, 1).amount, 0);
     }
 
+    /// @notice The FeeExceedsAmount recovery loop (was previously untested at the contract level):
+    ///         a 100%-fee config parks the inbound message in pending with no funds moved, a retry
+    ///         while still misconfigured stays pending, and lowering the fee then lets a
+    ///         permissionless retry deliver it exactly once with the correct recipient/fee split.
+    function test_retry_feeExceedsAmount_thenLowerFeeSucceeds() public {
+        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
+        address feeRecipient = makeAddr("proposer");
+        uint256 amount = 100 ether;
+
+        // 100% fee → fee == amount → FeeExceedsAmount → pending (no mint).
+        agency.setSpamControl(address(token), 0, 10_000, 0, type(uint256).max);
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
+        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, amount, feeRecipient);
+        vm.prank(SYSTEM);
+        bridge.executeRemoteMessages(msgs);
+
+        assertFalse(bridge.inboundConsumed(SRC_CID, 1), "not consumed while fee blocks it");
+        assertEq(bridge.pendingMessage(SRC_CID, 1).amount, amount, "parked in pending");
+        assertEq(token.totalSupply(), 0, "no mint while pending");
+
+        // Retry while the 100% fee is still configured → stays pending.
+        vm.expectEmit(true, false, false, true, address(bridge));
+        emit IBridge.BridgeMessageRetried(SRC_CID, 1, false);
+        bridge.retry(SRC_CID, 1);
+        assertFalse(bridge.inboundConsumed(SRC_CID, 1));
+        assertEq(token.totalSupply(), 0);
+
+        // Admin lowers the fee to 1%; a permissionless retry now delivers exactly once.
+        agency.setSpamControl(address(token), 0, 100, 0, type(uint256).max);
+        uint256 expectedFee = (amount * 100) / 10_000; // 1 ether
+        uint256 toRecipient = amount - expectedFee;
+
+        vm.expectEmit(true, false, false, true, address(bridge));
+        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, toRecipient, feeRecipient, expectedFee);
+        vm.expectEmit(true, false, false, true, address(bridge));
+        emit IBridge.BridgeMessageRetried(SRC_CID, 1, true);
+        vm.prank(makeAddr("rando"));
+        bridge.retry(SRC_CID, 1);
+
+        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
+        assertEq(token.balanceOf(bob), toRecipient, "recipient gets amount - fee");
+        assertEq(token.balanceOf(feeRecipient), expectedFee, "feeRecipient gets fee");
+        assertEq(token.totalSupply(), amount, "minted exactly amount, no double-mint");
+        assertEq(bridge.pendingMessage(SRC_CID, 1).amount, 0, "pending cleared");
+
+        // Idempotency: retrying after success reverts (pending cleared).
+        vm.expectRevert(IBridge.NoPendingMessage.selector);
+        bridge.retry(SRC_CID, 1);
+    }
+
     function test_retry_isPermissionless() public {
         (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
         _makePending(token, 1, 5 ether);
