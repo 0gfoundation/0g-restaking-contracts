@@ -145,6 +145,20 @@ land at the deterministic addresses with every owner/role slot set to the prod g
 > switch to strict keyless Nick-method (hand-picked `(r, s)` + `ecrecover`-derived sender) —
 > a hardening option, not a correctness gap in the current deploy path.
 
+### Bridge: per-message gas cap invariant (executeRemoteMessages)
+
+`executeRemoteMessages` is a 30M-gas system call looping over up to `MaxBridgeMessagesPerBlock`
+(= 48, a CL↔EL consensus parameter) inbound messages. Each is dispatched via
+`executeOneInternal{gas: PER_MESSAGE_GAS_CAP}` (400k) so one failing message can't drain the batch —
+critical because a stateful-precompile failure (e.g. W0G mint over cap) is an EVM *halt* that burns
+all forwarded gas (not a refunding revert), so two uncapped failures would OOG-revert the whole
+batch and strand every message (CL nonce already advanced) unrecoverably.
+
+Invariant to preserve when tuning: `MaxBridgeMessagesPerBlock × (PER_MESSAGE_GAS_CAP + ~140k struct-park
++ overhead) ≤ 30M` (currently 48 × ~540k ≈ 26.4M). `retry` is intentionally UNCAPPED (user-funded), so a
+message needing > 400k parks in-batch but is still deliverable via retry. See
+`docs/plans/bridge-precompile-gas-finding-2026-06-04.md` and `test/BridgeBatchGasGuarantee.t.sol`.
+
 ## Testing Patterns
 
 Test base class `ZeroGravityBase.t.sol` sets up the full Symbiotic infrastructure (registries, factories, services). Tests use mock tokens and create validators/operators through the factory. `RewarderBase.t.sol` provides helpers for rewarder testing on the 0G chain side.
