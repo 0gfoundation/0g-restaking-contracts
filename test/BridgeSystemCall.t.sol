@@ -321,11 +321,13 @@ contract BridgeSystemCallTest is BridgeBaseTest {
         assertEq(token.balanceOf(proposer), 1 ether + 5 ether, "big: ceiling applied (cumulative)");
     }
 
-    /// @notice Protocol max-batch sanity check. The CL/EL budget caps `InboundMessage[]` at 64
-    ///         per block; verify the contract delivers a full 64-message batch without any
-    ///         per-message failures and that the post-state matches the per-message expected
-    ///         balances and `inboundConsumed` flags.
-    function test_executeRemoteMessages_maxBatchOf64() public {
+    /// @notice Large-batch sanity check. The contract itself has no on-chain batch cap — the
+    ///         48-messages-per-block budget is a CL/EL consensus parameter enforced off-contract.
+    ///         This test deliberately drives 64 messages (above the network budget) through one
+    ///         call to stress the loop boundary; verify every message is delivered without
+    ///         per-message failures and the post-state matches the expected balances and
+    ///         `inboundConsumed` flags.
+    function test_executeRemoteMessages_largeBatch64() public {
         (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
         uint256 batchSize = 64;
 
