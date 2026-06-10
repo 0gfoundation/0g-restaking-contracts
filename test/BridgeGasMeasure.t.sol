@@ -41,7 +41,9 @@ contract ProbeMB is ERC20 {
         consumed += g - gasleft();
     }
 
-    function burn(uint256 amt) external {
+    function burn(
+        uint256 amt
+    ) external {
         _burn(msg.sender, amt);
     }
 }
@@ -54,7 +56,9 @@ contract BridgeGasMeasureTest is BridgeBaseTest {
     address constant SYSTEM = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
     uint64 constant SRC_CID = 99;
 
-    function _run(IBridge.InboundMessage[] memory msgs) internal returns (uint256 used) {
+    function _run(
+        IBridge.InboundMessage[] memory msgs
+    ) internal returns (uint256 used) {
         uint256 g0 = gasleft();
         vm.prank(SYSTEM);
         bridge.executeRemoteMessages(msgs);

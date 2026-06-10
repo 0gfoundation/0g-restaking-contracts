@@ -328,9 +328,7 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     ) internal {
         BridgeStorage storage $ = _getBridgeStorage();
         try this.executeOneInternal{gas: PER_MESSAGE_GAS_CAP}(m) returns (
-            uint256 toRecipient,
-            address feeRecipient,
-            uint256 fee
+            uint256 toRecipient, address feeRecipient, uint256 fee
         ) {
             $.inboundConsumed[m.srcChainID][m.nonce] = true;
             // Wipe any stale pending entry (defensive — should be impossible under CL nonce rules).

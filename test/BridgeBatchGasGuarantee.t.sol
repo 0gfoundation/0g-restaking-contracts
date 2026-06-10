@@ -19,7 +19,9 @@ contract HaltBurnToken is ERC20 {
         }
     }
 
-    function burn(uint256) external {}
+    function burn(
+        uint256
+    ) external {}
 }
 
 /// Plain mintable token; every mint succeeds cheaply.
@@ -30,7 +32,9 @@ contract OkMintToken is ERC20 {
         _mint(to, amt);
     }
 
-    function burn(uint256) external {}
+    function burn(
+        uint256
+    ) external {}
 }
 
 /// Mintable token whose mint costs > PER_MESSAGE_GAS_CAP (writes 20 fresh slots ≈ 440k) so it
@@ -47,7 +51,9 @@ contract GasGuzzlerToken is ERC20 {
         _mint(to, amt);
     }
 
-    function burn(uint256) external {}
+    function burn(
+        uint256
+    ) external {}
 }
 
 /// @notice Proves the executeRemoteMessages system call NEVER reverts the whole batch under the
@@ -66,7 +72,8 @@ contract BridgeBatchGasGuaranteeTest is BridgeBaseTest {
 
         IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](N);
         for (uint256 i = 0; i < N; ++i) {
-            msgs[i] = _msgWithFee(SRC_CID, uint64(i + 1), address(t), makeAddr(string(abi.encode(i))), 1 ether, address(0));
+            msgs[i] =
+                _msgWithFee(SRC_CID, uint64(i + 1), address(t), makeAddr(string(abi.encode(i))), 1 ether, address(0));
         }
 
         // Under EXACTLY the 30M system-call budget: must NOT out-of-gas revert the batch.
@@ -87,7 +94,8 @@ contract BridgeBatchGasGuaranteeTest is BridgeBaseTest {
 
         IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](N);
         for (uint256 i = 0; i < N; ++i) {
-            msgs[i] = _msgWithFee(SRC_CID, uint64(i + 1), address(t), makeAddr(string(abi.encode(i))), 1 ether, address(0));
+            msgs[i] =
+                _msgWithFee(SRC_CID, uint64(i + 1), address(t), makeAddr(string(abi.encode(i))), 1 ether, address(0));
         }
 
         vm.prank(SYSTEM);
