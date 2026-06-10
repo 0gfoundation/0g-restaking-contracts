@@ -59,10 +59,10 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     ///      and grants meta-authority over role assignments.
     bytes32 public constant ADMIN_ROLE = keccak256("BRIDGE_ADMIN_ROLE");
 
-    /// @notice Hard cap on `feeBps` accepted by `setSpamControl`. 10000 = 100% — fees up to
-    ///         (but not equal to) the full inbound amount are allowed. A fee equal to or
-    ///         exceeding the inbound amount makes delivery revert `FeeExceedsAmount`; the
-    ///         message stays parked until admin rebalances spam config.
+    /// @notice Hard cap on `proposerFeeBps + keeperFeeBps` accepted by `setSpamControl`.
+    ///         10000 = 100% — fees up to (but not equal to) the full inbound amount are allowed.
+    ///         Combined fees equal to or exceeding the inbound amount make delivery revert
+    ///         `FeeExceedsAmount`; the message stays parked until admin rebalances spam config.
     uint16 public constant MAX_FEE_BPS = 10_000;
 
     /// @notice Per-token bridge configuration. Schema-frozen (only enabled flag + mode).
@@ -73,24 +73,6 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         /// LockRelease (escrow on source / release from bridge balance on dest) or MintBurn (burn on
         /// source / mint on dest via MINTER_ROLE). Mode may differ per chain for the same asset.
         BridgeMode mode;
-    }
-
-    /// @notice Per-token anti-spam controls.
-    /// @dev Two orthogonal knobs stored together for storage-layout convenience: `minCrossOutAmount`
-    ///      gates the source side, the `fee*` triple gates the destination side. Each chain stores
-    ///      both groups because the same token can be source on one route and destination on another.
-    struct TokenSpamControl {
-        /// Source-side floor on user-path `amount`. `lockAndSend` / `burnAndSend` revert with
-        /// `AmountTooSmall` if `amount < minCrossOutAmount`. Zero disables the floor.
-        uint256 minCrossOutAmount;
-        /// Destination-side fee rate in basis points (10_000 = 100%), capped by `MAX_FEE_BPS`. Raw
-        /// fee is `(amount * feeBps) / 10_000`, then clamped to `[feeMin, feeMax]`.
-        uint16 feeBps;
-        /// Destination-side floor on the clamped fee. Raw bps fee below this is rounded up to `feeMin`.
-        uint256 feeMin;
-        /// Destination-side ceiling on the clamped fee. Raw bps fee above this is capped at `feeMax`.
-        /// Must satisfy `feeMin <= feeMax`.
-        uint256 feeMax;
     }
 
     /// @custom:storage-location erc7201:0g.bridge.Bridge
@@ -210,17 +192,21 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         if (amount < s.minCrossOutAmount) revert AmountTooSmall();
     }
 
-    /// @dev Compute the destination-side fee for an inbound `amount` against `s`. The bps fee is
-    ///      `(amount * feeBps) / 10_000`, then clamped to `[feeMin, feeMax]`. Returns 0 when no fee
-    ///      knob is configured (`feeBps == 0 && feeMin == 0`). Reverts with `FeeExceedsAmount` if
-    ///      the clamped fee would consume the entire amount — the message stays parked until the
-    ///      destination admin fixes the misconfiguration, then anyone can deliver it.
-    function _computeFee(uint256 amount, TokenSpamControl memory s) internal pure returns (uint256 fee) {
-        if (s.feeBps == 0 && s.feeMin == 0) return 0;
-        fee = (amount * s.feeBps) / 10_000;
-        if (fee < s.feeMin) fee = s.feeMin;
-        if (fee > s.feeMax) fee = s.feeMax;
-        if (fee >= amount) revert FeeExceedsAmount();
+    /// @dev Compute ONE destination-side fee leg for an inbound `amount`. The bps fee is
+    ///      `(amount * bps) / 10_000`, then clamped to `[feeMin, feeMax]`. Returns 0 when the leg
+    ///      is unconfigured (`bps == 0 && feeMin == 0`); `feeMax == 0` also clamps the leg to 0.
+    ///      Whether the combined legs fit inside `amount` is checked by the caller
+    ///      (`FeeExceedsAmount`), not per leg.
+    function _computeFee(
+        uint256 amount,
+        uint16 bps,
+        uint256 feeMin,
+        uint256 feeMax
+    ) internal pure returns (uint256 fee) {
+        if (bps == 0 && feeMin == 0) return 0;
+        fee = (amount * bps) / 10_000;
+        if (fee < feeMin) fee = feeMin;
+        if (fee > feeMax) fee = feeMax;
     }
 
     // ============= System path (park) =============
@@ -253,16 +239,18 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     function deliver(uint64 srcCID, uint64 nonce) external nonReentrant {
         // Direct internal dispatch (no try/catch): a failure reverts the whole tx with the
         // underlying reason, and the message stays parked.
-        _deliverOne(srcCID, nonce);
+        _deliverOne(srcCID, nonce, msg.sender);
     }
 
     /// @inheritdoc IBridge
     function deliverBatch(uint64 srcCID, uint64[] calldata nonces) external nonReentrant {
         uint256 n = nonces.length;
         for (uint256 i = 0; i < n; ++i) {
-            // External self-call so each message's failure is isolated by try/catch. All remaining
-            // gas is forwarded (no per-message cap) — the caller pays and bears halt-burn risk.
-            try this.deliverOneInternal(srcCID, nonces[i]) {}
+            // External self-call so each message's failure is isolated by try/catch. Inside the
+            // self-call frame `msg.sender` is the Bridge itself, so the keeper (this frame's
+            // msg.sender) must travel as an argument. All remaining gas is forwarded (no
+            // per-message cap) — the caller pays and bears halt-burn risk.
+            try this.deliverOneInternal(srcCID, nonces[i], msg.sender) {}
             catch (bytes memory reason) {
                 emit BridgeMessageFailed(srcCID, nonces[i], reason);
             }
@@ -272,15 +260,20 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     /// @notice Self-call dispatch point for `deliverBatch`'s per-message try/catch isolation.
     /// @dev Reverts unless `msg.sender == address(this)`. Not part of `IBridge` — external only
     ///      because Solidity try/catch requires an external call.
-    function deliverOneInternal(uint64 srcCID, uint64 nonce) external {
+    /// @param keeper The original `deliverBatch` caller, paid the keeper fee leg.
+    function deliverOneInternal(uint64 srcCID, uint64 nonce, address keeper) external {
         if (msg.sender != address(this)) revert OnlySelf();
-        _deliverOne(srcCID, nonce);
+        _deliverOne(srcCID, nonce, keeper);
     }
 
-    /// @dev Deliver one parked message: checks, fee split, state flip (consumed + pending cleared)
-    ///      BEFORE the token interactions, then the visible `BridgeIn`. Reverts (bubbling the
-    ///      underlying reason) on any failure, leaving the message parked.
-    function _deliverOne(uint64 srcCID, uint64 nonce) internal {
+    /// @dev Deliver one parked message: checks, dual fee legs, state flip (consumed + pending
+    ///      cleared) BEFORE the token interactions, then the visible `BridgeIn`. Reverts (bubbling
+    ///      the underlying reason) on any failure, leaving the message parked.
+    ///      Split: `toRecipient = amount - proposerFee - keeperFee`; `proposerFee` goes to the
+    ///      parked message's `feeRecipient` (skipped when zero address — no value stuck);
+    ///      `keeperFee` goes to `keeper` (the delivery tx sender). For LockRelease all three legs
+    ///      release from the same bridge escrow, so escrow must cover the full inbound amount.
+    function _deliverOne(uint64 srcCID, uint64 nonce, address keeper) internal {
         BridgeStorage storage $ = _getBridgeStorage();
         if ($.inboundConsumed[srcCID][nonce]) revert AlreadyConsumed();
         if (!$.hasPending[srcCID][nonce]) revert NoPendingMessage();
@@ -292,18 +285,11 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         if (!cfg.enabled) revert("disabled");
 
         TokenSpamControl memory s = $.spamControl[m.localToken];
-        uint256 fee = _computeFee(m.amount, s);
-        bool payFee = fee > 0 && m.feeRecipient != address(0);
-        uint256 toRecipient;
-        address feeRecipient;
-        if (payFee) {
-            toRecipient = m.amount - fee;
-            feeRecipient = m.feeRecipient;
-        } else {
-            toRecipient = m.amount;
-            feeRecipient = address(0);
-            fee = 0;
-        }
+        uint256 proposerFee = _computeFee(m.amount, s.proposerFeeBps, s.proposerFeeMin, s.proposerFeeMax);
+        uint256 keeperFee = _computeFee(m.amount, s.keeperFeeBps, s.keeperFeeMin, s.keeperFeeMax);
+        if (m.feeRecipient == address(0)) proposerFee = 0;
+        if (proposerFee + keeperFee >= m.amount) revert FeeExceedsAmount();
+        uint256 toRecipient = m.amount - proposerFee - keeperFee;
 
         // Effects before interactions: consumed + cleared before any token call.
         $.inboundConsumed[srcCID][nonce] = true;
@@ -312,17 +298,25 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
 
         if (cfg.mode == BridgeMode.MintBurn) {
             IBurnable(m.localToken).mint(m.recipient, toRecipient);
-            if (payFee) {
-                IBurnable(m.localToken).mint(feeRecipient, fee);
-            }
+            if (proposerFee > 0) IBurnable(m.localToken).mint(m.feeRecipient, proposerFee);
+            if (keeperFee > 0) IBurnable(m.localToken).mint(keeper, keeperFee);
         } else {
             IERC20(m.localToken).safeTransfer(m.recipient, toRecipient);
-            if (payFee) {
-                IERC20(m.localToken).safeTransfer(feeRecipient, fee);
-            }
+            if (proposerFee > 0) IERC20(m.localToken).safeTransfer(m.feeRecipient, proposerFee);
+            if (keeperFee > 0) IERC20(m.localToken).safeTransfer(keeper, keeperFee);
         }
 
-        emit BridgeIn(srcCID, nonce, m.localToken, m.recipient, toRecipient, feeRecipient, fee);
+        emit BridgeIn(
+            srcCID,
+            nonce,
+            m.localToken,
+            m.recipient,
+            toRecipient,
+            proposerFee > 0 ? m.feeRecipient : address(0),
+            proposerFee,
+            keeper,
+            keeperFee
+        );
     }
 
     // ============= Admin (ADMIN_ROLE) =============
@@ -353,21 +347,16 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     }
 
     /// @inheritdoc IBridge
-    function setSpamControl(
-        address token,
-        uint256 minCrossOutAmount,
-        uint16 feeBps,
-        uint256 feeMin,
-        uint256 feeMax
-    ) external onlyRole(ADMIN_ROLE) {
+    function setSpamControl(address token, TokenSpamControl calldata cfg) external onlyRole(ADMIN_ROLE) {
         if (token == address(0)) revert ZeroAddress();
-        if (feeBps > MAX_FEE_BPS) revert FeeBpsTooHigh();
-        if (feeMin > feeMax) revert InvalidFeeBounds();
+        // Combined cap: bps alone must not be able to exceed the inbound amount.
+        if (uint256(cfg.proposerFeeBps) + uint256(cfg.keeperFeeBps) > MAX_FEE_BPS) revert FeeBpsTooHigh();
+        if (cfg.proposerFeeMin > cfg.proposerFeeMax) revert InvalidFeeBounds();
+        if (cfg.keeperFeeMin > cfg.keeperFeeMax) revert InvalidFeeBounds();
 
         BridgeStorage storage $ = _getBridgeStorage();
-        $.spamControl[token] =
-            TokenSpamControl({minCrossOutAmount: minCrossOutAmount, feeBps: feeBps, feeMin: feeMin, feeMax: feeMax});
-        emit SpamControlUpdated(token, minCrossOutAmount, feeBps, feeMin, feeMax);
+        $.spamControl[token] = cfg;
+        emit SpamControlUpdated(token, cfg);
     }
 
     // ============= Views =============
@@ -417,9 +406,8 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     /// @inheritdoc IBridge
     function spamControl(
         address token
-    ) external view returns (uint256 minCrossOutAmount, uint16 feeBps, uint256 feeMin, uint256 feeMax) {
-        TokenSpamControl memory s = _getBridgeStorage().spamControl[token];
-        return (s.minCrossOutAmount, s.feeBps, s.feeMin, s.feeMax);
+    ) external view returns (TokenSpamControl memory) {
+        return _getBridgeStorage().spamControl[token];
     }
 
     /// @notice Returns the BridgeERC20 beacon address (read helper, not in IBridge interface).

@@ -24,7 +24,7 @@ interface IBridge {
     /// @dev Field order is wire-pinned and MUST mirror the EL-side encoder in the bridge crate of 0g-reth.
     ///      `feeRecipient` is NOT part of the SSZ wire format — it is injected by the EL system-call
     ///      dispatcher per block, equal to `block.coinbase` (proposer withdrawal address). It is stored
-    ///      inside the parked message and paid the destination-side fee at deliver time.
+    ///      inside the parked message and paid the proposer fee leg at deliver time.
     struct InboundMessage {
         /// Source chain's `chainId` (the chain that emitted the originating `BridgeOut`).
         uint64 srcChainID;
@@ -34,8 +34,7 @@ interface IBridge {
         /// Token address on THIS (destination) chain. The CL poller resolves source-emitted
         /// `remoteToken` to the local mapping before injecting into the SSZ message.
         address localToken;
-        /// Beneficiary on this chain. Receives `amount` minus the destination-side fee, paid at
-        /// deliver time.
+        /// Beneficiary on this chain. Receives `amount` minus both fee legs, paid at deliver time.
         address recipient;
         /// Full inbound amount before the destination-side fee split (i.e. what the source escrowed
         /// or burned). The split happens at deliver time, against the spam-control config in effect
@@ -45,6 +44,34 @@ interface IBridge {
         /// `block.coinbase` post-MinerReward fork). All messages parked in a block share the same
         /// value. `address(0)` means "skip the proposer fee leg"; no value is stuck.
         address feeRecipient;
+    }
+
+    /// @notice Per-token anti-spam controls. One source-side knob plus two independent
+    ///         destination-side fee legs, both charged at deliver time.
+    /// @dev Each chain stores all fields because the same token can be source on one route and
+    ///      destination on another. Each fee leg is computed independently (bps, then clamp to
+    ///      `[min, max]`); `bps == 0 && min == 0` (or `max == 0`) makes that leg charge nothing.
+    struct TokenSpamControl {
+        /// Source-side floor on user-path `amount`. `lockAndSend` / `burnAndSend` revert with
+        /// `AmountTooSmall` if `amount < minCrossOutAmount`. Zero disables the floor.
+        uint256 minCrossOutAmount;
+        /// Proposer leg rate in basis points (10_000 = 100%), paid at deliver time to the parked
+        /// message's `feeRecipient` (the dest-block proposer that packed it).
+        uint16 proposerFeeBps;
+        /// Proposer leg floor: raw bps fee below this is rounded up.
+        uint256 proposerFeeMin;
+        /// Proposer leg hard cap. `0` forces the proposer fee to always be 0 — set it nonzero to
+        /// actually charge. Must satisfy `proposerFeeMin <= proposerFeeMax`.
+        uint256 proposerFeeMax;
+        /// Keeper leg rate in basis points, paid at deliver time to the `deliver` / `deliverBatch`
+        /// caller (the keeper that lands the delivery tx).
+        uint16 keeperFeeBps;
+        /// Keeper leg floor: raw bps fee below this is rounded up.
+        uint256 keeperFeeMin;
+        /// Keeper leg hard cap. `0` forces the keeper fee to always be 0 (no keeper incentive —
+        /// the token relies on self-claims or an operator-subsidised bot). Must satisfy
+        /// `keeperFeeMin <= keeperFeeMax`.
+        uint256 keeperFeeMax;
     }
 
     // ============= Errors =============
@@ -73,15 +100,17 @@ interface IBridge {
     /// @dev User-path call's `amount` is below the configured `minCrossOutAmount` for the token.
     error AmountTooSmall();
 
-    /// @dev `setSpamControl` called with a bps total exceeding `MAX_FEE_BPS` (100%).
+    /// @dev `setSpamControl` called with `proposerFeeBps + keeperFeeBps` exceeding `MAX_FEE_BPS`
+    ///      (100%), which would let bps alone consume more than the inbound amount.
     error FeeBpsTooHigh();
 
-    /// @dev Destination-side computed (and clamped) fee is greater than or equal to the inbound
-    ///      `amount`. Delivery reverts and the message stays parked so the destination admin can
-    ///      fix `spamControl` (e.g. lower `feeMin`); then anyone can deliver it.
+    /// @dev Destination-side `proposerFee + keeperFee` (each computed and clamped per leg) is
+    ///      greater than or equal to the inbound `amount`. Delivery reverts and the message stays
+    ///      parked so the destination admin can fix `spamControl` (e.g. lower a leg's `feeMin`);
+    ///      then anyone can deliver it.
     error FeeExceedsAmount();
 
-    /// @dev `setSpamControl` called with `feeMin > feeMax`.
+    /// @dev `setSpamControl` called with `feeMin > feeMax` on either fee leg.
     error InvalidFeeBounds();
 
     /// @dev User path called against a `(token, dstCID)` pair with no remote-token mapping
@@ -117,15 +146,17 @@ interface IBridge {
     /// @notice Emitted on the destination chain when a parked message is delivered. Emitted by the
     ///         delivery transaction (`deliver` / `deliverBatch`), so it is fully visible to
     ///         receipts / `eth_getLogs` — unlike system-call logs, which the EL discards.
+    ///         Conservation: `amount + proposerFee + keeperFee == inbound amount`.
     /// @param srcChainID Source chain that produced the message.
     /// @param nonce Per-(srcCID, dstCID) monotonic nonce.
     /// @param localToken Token address on this destination chain.
     /// @param recipient Final receiver on this chain.
-    /// @param amount Net amount delivered to `recipient` (inbound amount minus the fee).
-    /// @param feeRecipient Address paid the destination-side fee (block proposer's withdrawal
-    ///        address, EL-injected at park time). `address(0)` if no fee was paid out.
-    /// @param fee Fee paid to `feeRecipient` (zero if `spamControl` is unconfigured or
-    ///        `feeRecipient` is zero).
+    /// @param amount Net amount delivered to `recipient` (inbound amount minus both fee legs).
+    /// @param feeRecipient Proposer leg payee (the dest-block proposer's withdrawal address,
+    ///        EL-injected at park time). When `address(0)`, the proposer leg was skipped.
+    /// @param proposerFee Fee paid to `feeRecipient` (zero if the leg is unconfigured or skipped).
+    /// @param keeper Keeper leg payee — the `msg.sender` of the delivery transaction.
+    /// @param keeperFee Fee paid to `keeper` (zero if the leg is unconfigured).
     event BridgeIn(
         uint64 indexed srcChainID,
         uint64 nonce,
@@ -133,7 +164,9 @@ interface IBridge {
         address recipient,
         uint256 amount,
         address feeRecipient,
-        uint256 fee
+        uint256 proposerFee,
+        address keeper,
+        uint256 keeperFee
     );
 
     /// @notice Emitted by `deliverBatch` for each message whose delivery attempt failed. The
@@ -147,13 +180,8 @@ interface IBridge {
 
     /// @notice Emitted when an admin updates a token's anti-spam controls.
     /// @param token Token whose controls were updated.
-    /// @param minCrossOutAmount New minimum cross-out amount (source-side anti-spam).
-    /// @param feeBps New basis-points fee (destination-side fee charged on inbound `amount`).
-    /// @param feeMin New floor on the destination-side fee.
-    /// @param feeMax New cap on the destination-side fee.
-    event SpamControlUpdated(
-        address indexed token, uint256 minCrossOutAmount, uint16 feeBps, uint256 feeMin, uint256 feeMax
-    );
+    /// @param cfg The full control set now in effect (stored verbatim).
+    event SpamControlUpdated(address indexed token, TokenSpamControl cfg);
 
     // ============= User paths =============
 
@@ -180,17 +208,18 @@ interface IBridge {
 
     // ============= Permissionless delivery =============
 
-    /// @notice Deliver a single parked message: compute the destination-side fee, move tokens,
-    ///         mark consumed, emit `BridgeIn`.
-    /// @dev Anyone may call; forwards all gas; reverts with the underlying reason on failure
-    ///      (the message stays parked).
+    /// @notice Deliver a single parked message: compute both destination-side fee legs, move
+    ///         tokens 3-way (recipient / proposer / keeper), mark consumed, emit `BridgeIn`.
+    /// @dev Anyone may call (the keeper fee leg is paid to `msg.sender`); forwards all gas;
+    ///      reverts with the underlying reason on failure (the message stays parked).
     function deliver(uint64 srcCID, uint64 nonce) external;
 
     /// @notice Deliver a batch of parked messages with per-message try/catch isolation: a failed
     ///         message emits `BridgeMessageFailed` and stays parked while later ones still attempt.
-    /// @dev Anyone may call. There is deliberately NO per-message gas cap — the caller pays for
-    ///      the whole batch and bears the gas-burn risk of an exceptionally-halting message (e.g.
-    ///      a stateful-precompile failure burns all gas forwarded to the token call). Use
+    /// @dev Anyone may call (each delivered message pays its keeper fee leg to `msg.sender`).
+    ///      There is deliberately NO per-message gas cap — the caller pays for the whole batch
+    ///      and bears the gas-burn risk of an exceptionally-halting message (e.g. a
+    ///      stateful-precompile failure burns all gas forwarded to the token call). Use
     ///      `previewDeliver` to pre-filter, and size batches accordingly.
     function deliverBatch(uint64 srcCID, uint64[] calldata nonces) external;
 
@@ -217,28 +246,19 @@ interface IBridge {
     ) external returns (address localToken);
 
     /// @notice Configure per-token anti-spam controls.
-    /// @dev Only callable by `ADMIN_ROLE` (BridgeAgency). The four fields are stored verbatim and
-    ///      applied independently:
+    /// @dev Only callable by `ADMIN_ROLE` (BridgeAgency). The struct is stored verbatim:
     ///        - `minCrossOutAmount` is enforced source-side by `lockAndSend` / `burnAndSend`.
-    ///        - `feeBps / feeMin / feeMax` are applied destination-side at deliver time, splitting
-    ///          the inbound `amount` between the recipient and the parked message's `feeRecipient`
-    ///          (the block proposer's withdrawal address, EL-injected at park time).
-    ///      Setting all fields to zero disables the controls for the token. Note that `feeMax`
-    ///      is a hard cap on the computed fee: with `feeMax == 0` the fee is always 0 even if
-    ///      `feeBps` / `feeMin` are nonzero, so charging any fee requires a nonzero `feeMax`.
+    ///        - the `proposerFee*` / `keeperFee*` triples are applied destination-side at deliver
+    ///          time, splitting the inbound `amount` 3-way between the recipient, the parked
+    ///          message's `feeRecipient` (proposer leg), and the delivery caller (keeper leg).
+    ///      Validation: `proposerFeeBps + keeperFeeBps <= MAX_FEE_BPS` (10000), each leg's
+    ///      `feeMin <= feeMax`, `token != 0`. Setting all fields to zero disables the controls.
+    ///      Note that each leg's `feeMax` is a hard cap on that leg's computed fee: with
+    ///      `feeMax == 0` the leg always charges 0 even if its `bps` / `feeMin` are nonzero, so
+    ///      charging a fee requires a nonzero `feeMax` on that leg.
     /// @param token Token to configure (any registered local token, regardless of mode).
-    /// @param minCrossOutAmount Reject `lockAndSend` / `burnAndSend` whose `amount` is strictly less.
-    /// @param feeBps Basis-points fee on inbound `amount`. Capped at `MAX_FEE_BPS` (10000 = 100%).
-    /// @param feeMin Floor on the computed fee (acts as a flat minimum). Must be `<= feeMax`.
-    /// @param feeMax Hard cap on the computed fee. Must be `>= feeMin`. `feeMax == 0` forces the
-    ///        fee to 0 regardless of `feeBps` / `feeMin` — set it nonzero to actually charge fees.
-    function setSpamControl(
-        address token,
-        uint256 minCrossOutAmount,
-        uint16 feeBps,
-        uint256 feeMin,
-        uint256 feeMax
-    ) external;
+    /// @param cfg The full control set to store (see `TokenSpamControl` field docs).
+    function setSpamControl(address token, TokenSpamControl calldata cfg) external;
 
     // ============= Views =============
 
@@ -262,12 +282,8 @@ interface IBridge {
     function inboundConsumed(uint64 srcCID, uint64 nonce) external view returns (bool);
     function pendingMessage(uint64 srcCID, uint64 nonce) external view returns (InboundMessage memory);
 
-    /// @notice Read the configured anti-spam controls for `token`.
-    /// @return minCrossOutAmount Source-side minimum acceptable amount.
-    /// @return feeBps Destination-side basis-points fee.
-    /// @return feeMin Destination-side floor on the computed fee.
-    /// @return feeMax Destination-side cap on the computed fee.
+    /// @notice Read the configured anti-spam controls for `token` (all 7 fields).
     function spamControl(
         address token
-    ) external view returns (uint256 minCrossOutAmount, uint16 feeBps, uint256 feeMin, uint256 feeMax);
+    ) external view returns (TokenSpamControl memory);
 }

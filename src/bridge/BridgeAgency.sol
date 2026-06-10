@@ -105,22 +105,18 @@ contract BridgeAgency is Initializable, OwnableUpgradeable {
     }
 
     /// @notice Configure per-token anti-spam controls.
-    /// @dev Routes to `Bridge.setSpamControl`. `minCrossOutAmount` is the source-side floor
-    ///      enforced by `lockAndSend` / `burnAndSend`; `feeBps / feeMin / feeMax` configure the
-    ///      destination-side fee that `executeRemoteMessages` pays out of the inbound amount to
-    ///      the EL-injected proposer fee recipient. Bridge enforces `feeBps <= MAX_FEE_BPS` (10000)
-    ///      and `feeMin <= feeMax`; setting all fields to zero disables the controls for `token`.
-    ///      `feeMax` is a hard cap on the computed fee: with `feeMax == 0` the fee is always 0
-    ///      even if `feeBps` / `feeMin` are nonzero, so charging a fee requires nonzero `feeMax`.
-    function setSpamControl(
-        address token,
-        uint256 minCrossOutAmount,
-        uint16 feeBps,
-        uint256 feeMin,
-        uint256 feeMax
-    ) external onlyOwner {
+    /// @dev Routes to `Bridge.setSpamControl`. `cfg.minCrossOutAmount` is the source-side floor
+    ///      enforced by `lockAndSend` / `burnAndSend`; the `proposerFee*` / `keeperFee*` triples
+    ///      configure the destination-side fee legs charged at deliver time — proposer leg to the
+    ///      parked message's `feeRecipient`, keeper leg to the `deliver` / `deliverBatch` caller.
+    ///      Bridge enforces `proposerFeeBps + keeperFeeBps <= MAX_FEE_BPS` (10000) and per-leg
+    ///      `feeMin <= feeMax`; setting all fields to zero disables the controls for `token`.
+    ///      Each leg's `feeMax` is a hard cap on that leg's computed fee: with `feeMax == 0` the
+    ///      leg always charges 0 even if its `bps` / `feeMin` are nonzero, so charging a fee
+    ///      requires a nonzero `feeMax` on that leg.
+    function setSpamControl(address token, IBridge.TokenSpamControl calldata cfg) external onlyOwner {
         AgencyStorage storage $ = _getAgencyStorage();
-        IBridge($.bridge).setSpamControl(token, minCrossOutAmount, feeBps, feeMin, feeMax);
+        IBridge($.bridge).setSpamControl(token, cfg);
     }
 
     // ============= Views =============
