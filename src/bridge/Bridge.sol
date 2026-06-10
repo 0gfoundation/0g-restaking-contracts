@@ -374,6 +374,26 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     }
 
     /// @inheritdoc IBridge
+    function previewDeliver(
+        uint64 srcCID,
+        uint64 nonce
+    ) external view returns (bool deliverable, uint256 toRecipient, uint256 proposerFee, uint256 keeperFee) {
+        BridgeStorage storage $ = _getBridgeStorage();
+        if ($.inboundConsumed[srcCID][nonce] || !$.hasPending[srcCID][nonce]) {
+            return (false, 0, 0, 0);
+        }
+        InboundMessage memory m = $.pendingMessages[srcCID][nonce];
+        TokenSpamControl memory s = $.spamControl[m.localToken];
+        proposerFee = _computeFee(m.amount, s.proposerFeeBps, s.proposerFeeMin, s.proposerFeeMax);
+        keeperFee = _computeFee(m.amount, s.keeperFeeBps, s.keeperFeeMin, s.keeperFeeMax);
+        if (m.feeRecipient == address(0)) proposerFee = 0;
+        if (proposerFee + keeperFee >= m.amount) {
+            return (false, 0, 0, 0);
+        }
+        return (true, m.amount - proposerFee - keeperFee, proposerFee, keeperFee);
+    }
+
+    /// @inheritdoc IBridge
     function tokenConfig(
         address localToken
     ) external view returns (bool enabled, BridgeMode mode) {
