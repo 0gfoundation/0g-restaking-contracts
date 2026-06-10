@@ -145,19 +145,30 @@ land at the deterministic addresses with every owner/role slot set to the prod g
 > switch to strict keyless Nick-method (hand-picked `(r, s)` + `ecrecover`-derived sender) —
 > a hardening option, not a correctness gap in the current deploy path.
 
-### Bridge: per-message gas cap invariant (executeRemoteMessages)
+### Bridge: park-then-deliver gas invariant (parkRemoteMessages)
 
-`executeRemoteMessages` is a 30M-gas system call looping over up to `MaxBridgeMessagesPerBlock`
-(= 48, a CL↔EL consensus parameter) inbound messages. Each is dispatched via
-`executeOneInternal{gas: PER_MESSAGE_GAS_CAP}` (400k) so one failing message can't drain the batch —
-critical because a stateful-precompile failure (e.g. W0G mint over cap) is an EVM *halt* that burns
-all forwarded gas (not a refunding revert), so two uncapped failures would OOG-revert the whole
-batch and strand every message (CL nonce already advanced) unrecoverably.
+Destination handling is split into a halt-safe system call plus permissionless delivery:
 
-Invariant to preserve when tuning: `MaxBridgeMessagesPerBlock × (PER_MESSAGE_GAS_CAP + ~140k struct-park
-+ overhead) ≤ 30M` (currently 48 × ~540k ≈ 26.4M). `retry` is intentionally UNCAPPED (user-funded), so a
-message needing > 400k parks in-batch but is still deliverable via retry. See
-`docs/plans/bridge-precompile-gas-finding-2026-06-04.md` and `test/BridgeBatchGasGuarantee.t.sol`.
+- **Park (system call).** `parkRemoteMessages` is the 30M-gas system call run every block by
+  `SYSTEM_ADDRESS`. It loops over up to `MaxBridgeMessagesPerBlock` (= 128, a CL↔EL consensus
+  parameter) inbound messages and does nothing but write each into `pendingMessages` (~144k/msg
+  worst-case, cold slots): no token calls, no fee math, no events. Because the loop has no revert
+  path it can never halt the consensus-critical system call on a bad message — the failure mode
+  that the old per-message-cap design existed to contain (a stateful-precompile mint-over-cap is
+  an EVM *halt* that burns all forwarded gas) simply cannot occur at park time, since park touches
+  no precompiles.
+- **Deliver (user transaction).** Anyone calls `deliver(srcCID, nonce)` or
+  `deliverBatch(srcCID, nonces[])` to compute the dual destination fee (proposer + keeper legs),
+  move tokens, flip `inboundConsumed`, and emit `BridgeIn`. There is NO per-message gas cap on
+  delivery — the keeper pays and bears any halt-burn risk. A message that needs more gas than a
+  proposer would spend is still deliverable because its caller funds it directly.
+
+Invariant to preserve when tuning the budget: worst-case all-park gas (all 128 messages, all
+storage slots cold) must stay ≤ 65% × 30M ≈ 19.5M (currently 128 × ~144k ≈ 18.4M), leaving
+headroom for future struct growth and EVM repricing. This is pinned by the all-park gas test
+`test/BridgeBatchGasGuarantee.t.sol`, which also sentinels `N == 128` against the CL constant.
+`MaxBridgeMessagesPerBlock` must stay identical in the CL primitives constants (primary + both
+satellites), the reth `0g-bridge` crate, and that test.
 
 ## Testing Patterns
 
