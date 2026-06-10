@@ -219,12 +219,15 @@ interface IBridge {
     ///        - `feeBps / feeMin / feeMax` are applied destination-side inside
     ///          `executeRemoteMessages`, splitting the inbound `amount` between the recipient and
     ///          the EL-injected `feeRecipient` (the block proposer's withdrawal address).
-    ///      Setting all fields to zero disables the controls for the token.
+    ///      Setting all fields to zero disables the controls for the token. Note that `feeMax`
+    ///      is a hard cap on the computed fee: with `feeMax == 0` the fee is always 0 even if
+    ///      `feeBps` / `feeMin` are nonzero, so charging any fee requires a nonzero `feeMax`.
     /// @param token Token to configure (any registered local token, regardless of mode).
     /// @param minCrossOutAmount Reject `lockAndSend` / `burnAndSend` whose `amount` is strictly less.
     /// @param feeBps Basis-points fee on inbound `amount`. Capped at `MAX_FEE_BPS` (10000 = 100%).
     /// @param feeMin Floor on the computed fee (acts as a flat minimum). Must be `<= feeMax`.
-    /// @param feeMax Cap on the computed fee. Must be `>= feeMin`.
+    /// @param feeMax Hard cap on the computed fee. Must be `>= feeMin`. `feeMax == 0` forces the
+    ///        fee to 0 regardless of `feeBps` / `feeMin` — set it nonzero to actually charge fees.
     function setSpamControl(
         address token,
         uint256 minCrossOutAmount,

@@ -110,6 +110,8 @@ contract BridgeAgency is Initializable, OwnableUpgradeable {
     ///      destination-side fee that `executeRemoteMessages` pays out of the inbound amount to
     ///      the EL-injected proposer fee recipient. Bridge enforces `feeBps <= MAX_FEE_BPS` (10000)
     ///      and `feeMin <= feeMax`; setting all fields to zero disables the controls for `token`.
+    ///      `feeMax` is a hard cap on the computed fee: with `feeMax == 0` the fee is always 0
+    ///      even if `feeBps` / `feeMin` are nonzero, so charging a fee requires nonzero `feeMax`.
     function setSpamControl(
         address token,
         uint256 minCrossOutAmount,
