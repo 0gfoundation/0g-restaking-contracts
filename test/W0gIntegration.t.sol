@@ -11,12 +11,11 @@ import {BridgeBaseTest} from "./BridgeBase.t.sol";
 import {MockA0GIBasePrecompile} from "./mocks/MockA0GIBasePrecompile.sol";
 import {MockWrappedA0GI} from "./mocks/MockWrappedA0GI.sol";
 
-/// @notice End-to-end W0G integration: Bridge → W0G → MockA0GIBasePrecompile.
-///         Verifies caller propagation (precompile sees `caller == W0G_ADDRESS`),
-///         per-minter cap tracking, mint-cap-insufficient revert is caught into pendingMessages,
-///         and the symmetric burn path.
+/// @notice End-to-end W0G integration: Bridge → W0G → MockA0GIBasePrecompile, through the
+///         park-then-deliver two-step. Verifies caller propagation (precompile sees
+///         `caller == W0G_ADDRESS`), per-minter cap tracking, mint-cap-insufficient failures
+///         keeping the message parked (recoverable after a cap bump), and the symmetric burn path.
 contract W0gIntegrationTest is BridgeBaseTest {
-    address constant SYSTEM = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
     uint64 constant SRC_CID = 99;
 
     /// @dev Production agency address (constant on-chain). Tests use it for setMinterCap.
@@ -59,15 +58,17 @@ contract W0gIntegrationTest is BridgeBaseTest {
         assertEq(init, 0);
     }
 
-    function test_systemMintsViaW0G_capTracked() public {
+    function test_parkThenDeliver_mintsViaW0G_capTracked() public {
         _setBridgeCap(100 ether);
 
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msg(SRC_CID, 1, address(w0g), bob, 25 ether);
+        // Step 1: system call parks — no mint yet, cap untouched.
+        _parkOne(_msg(SRC_CID, 1, address(w0g), bob, 25 ether));
+        assertEq(w0g.balanceOf(bob), 0, "park must not mint");
+        (, uint256 supplyAfterPark,) = precompile.minterSupply(address(bridge));
+        assertEq(supplyAfterPark, 0, "park must not consume cap");
 
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
+        // Step 2: permissionless delivery mints through the precompile.
+        bridge.deliver(SRC_CID, 1);
         assertEq(w0g.balanceOf(bob), 25 ether);
         assertTrue(bridge.inboundConsumed(SRC_CID, 1));
 
@@ -75,49 +76,63 @@ contract W0gIntegrationTest is BridgeBaseTest {
         assertEq(supply, 25 ether);
     }
 
-    function test_capInsufficient_landsInPending() public {
+    function test_capInsufficient_deliverRevertsAndStaysParked() public {
         _setBridgeCap(10 ether);
 
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msg(SRC_CID, 1, address(w0g), bob, 25 ether);
+        _parkOne(_msg(SRC_CID, 1, address(w0g), bob, 25 ether));
 
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
+        // Deliver bubbles the precompile's revert; the message stays parked.
+        vm.expectRevert(bytes("insufficient mint cap"));
+        bridge.deliver(SRC_CID, 1);
 
-        // Mint should have reverted; bridge shouldn't have minted anything.
         assertEq(w0g.balanceOf(bob), 0);
         assertFalse(bridge.inboundConsumed(SRC_CID, 1));
-        // Pending message stored.
         IBridge.InboundMessage memory stored = bridge.pendingMessage(SRC_CID, 1);
         assertEq(stored.amount, 25 ether);
         assertEq(stored.localToken, address(w0g));
     }
 
-    function test_retryAfterCapBumped_succeeds() public {
+    function test_capInsufficient_deliverBatchKeepsParkedAndContinues() public {
         _setBridgeCap(10 ether);
 
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msg(SRC_CID, 1, address(w0g), bob, 25 ether);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](2);
+        msgs[0] = _msg(SRC_CID, 1, address(w0g), bob, 25 ether); // over cap → fails
+        msgs[1] = _msg(SRC_CID, 2, address(w0g), alice, 5 ether); // within cap → delivers
+        _park(msgs);
+
+        uint64[] memory nonces = new uint64[](2);
+        (nonces[0], nonces[1]) = (1, 2);
+        bridge.deliverBatch(SRC_CID, nonces);
+
+        assertFalse(bridge.inboundConsumed(SRC_CID, 1), "over-cap message stays parked");
+        assertEq(bridge.pendingMessage(SRC_CID, 1).amount, 25 ether);
+        assertTrue(bridge.inboundConsumed(SRC_CID, 2), "later message still delivered");
+        assertEq(w0g.balanceOf(alice), 5 ether);
+    }
+
+    function test_deliverAfterCapBumped_succeeds() public {
+        _setBridgeCap(10 ether);
+
+        _parkOne(_msg(SRC_CID, 1, address(w0g), bob, 25 ether));
+        vm.expectRevert(bytes("insufficient mint cap"));
+        bridge.deliver(SRC_CID, 1);
         assertFalse(bridge.inboundConsumed(SRC_CID, 1));
 
         // Governance bumps cap.
         _setBridgeCap(100 ether);
 
-        // Anyone retries.
-        bridge.retry(SRC_CID, 1);
+        // Anyone delivers.
+        vm.prank(makeAddr("rando"));
+        bridge.deliver(SRC_CID, 1);
         assertTrue(bridge.inboundConsumed(SRC_CID, 1));
         assertEq(w0g.balanceOf(bob), 25 ether);
     }
 
     function test_burnAndSend_reducesSupply() public {
         _setBridgeCap(100 ether);
-        // Mint W0G to alice via system call first.
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msg(SRC_CID, 1, address(w0g), alice, 30 ether);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
+        // Mint W0G to alice via park → deliver first.
+        _parkOne(_msg(SRC_CID, 1, address(w0g), alice, 30 ether));
+        bridge.deliver(SRC_CID, 1);
         assertEq(w0g.balanceOf(alice), 30 ether);
 
         (, uint256 supplyAfterMint,) = precompile.minterSupply(address(bridge));
@@ -140,12 +155,10 @@ contract W0gIntegrationTest is BridgeBaseTest {
 
     function test_callerPropagation_precompileSeesW0GAsCaller() public {
         // Hit the mint path; if the precompile's caller-check were misconfigured (e.g. it saw the
-        // Bridge instead of W0G), this would revert with "sender is not WA0GI".
+        // Bridge instead of W0G), delivery would revert with "sender is not WA0GI".
         _setBridgeCap(100 ether);
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msg(SRC_CID, 1, address(w0g), bob, 5 ether);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
+        _parkOne(_msg(SRC_CID, 1, address(w0g), bob, 5 ether));
+        bridge.deliver(SRC_CID, 1);
         assertTrue(bridge.inboundConsumed(SRC_CID, 1));
     }
 }

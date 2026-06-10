@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.25;
 
-import {Test, console2} from "forge-std/Test.sol";
+import {Test, console2, Vm} from "forge-std/Test.sol";
 
 import {Bridge} from "../src/bridge/Bridge.sol";
 import {BridgeERC20} from "../src/bridge/BridgeERC20.sol";
@@ -10,12 +10,11 @@ import {IBridge} from "../src/bridge/IBridge.sol";
 import {BridgeBaseTest} from "./BridgeBase.t.sol";
 import {Token} from "./mocks/Token.sol";
 
-/// @notice Covers `executeRemoteMessages`: caller restriction, multi-msg batching, replay, per-msg
-///         try/catch failure isolation, `inboundConsumed` semantics, and the destination-side
-///         fee distribution that splits inbound `amount` between `recipient` and the EL-injected
-///         `feeRecipient`.
+/// @notice Covers `parkRemoteMessages` — the system call's park-only semantics: caller restriction,
+///         pending/lastParkedNonce state writes, idempotent skips of consumed/parked nonces, the
+///         no-token-calls / no-events / no-revert-paths guarantees, and over-budget batch stress.
+///         Token movement and fee math live in the delivery path (`BridgeDeliver.t.sol`).
 contract BridgeSystemCallTest is BridgeBaseTest {
-    address constant SYSTEM = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
     uint64 constant SRC_CID = 99;
 
     /// @dev Stand-in for the EL-injected proposer withdrawal address.
@@ -26,350 +25,159 @@ contract BridgeSystemCallTest is BridgeBaseTest {
         proposer = makeAddr("proposer");
     }
 
-    function test_executeRemoteMessages_revertsIfNotSystem() public {
+    function test_parkRemoteMessages_revertsIfNotSystem() public {
         IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
         msgs[0] = _msg(SRC_CID, 1, address(0xdead), bob, 1 ether);
         vm.expectRevert(IBridge.NotSystemCaller.selector);
-        bridge.executeRemoteMessages(msgs);
+        bridge.parkRemoteMessages(msgs);
     }
 
-    function test_executeRemoteMessages_singleMintBurn() public {
+    function test_park_storesPendingAndAdvancesWatermark() public {
         (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msg(SRC_CID, 1, address(token), bob, 5 ether);
+        _parkOne(_msgWithFee(SRC_CID, 1, address(token), bob, 5 ether, proposer));
 
-        vm.expectEmit(true, false, false, true, address(bridge));
-        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, 5 ether, address(0), 0);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        assertEq(token.balanceOf(bob), 5 ether);
-        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
-    }
-
-    function test_executeRemoteMessages_singleLockRelease() public {
-        // pre-fund the bridge with the token
-        Token token = new Token("LR");
-        token.transfer(address(bridge), 100 ether);
-        agency.addToken(address(token), IBridge.BridgeMode.LockRelease);
-
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msg(SRC_CID, 1, address(token), bob, 25 ether);
-
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        assertEq(token.balanceOf(bob), 25 ether);
-        assertEq(token.balanceOf(address(bridge)), 75 ether);
-        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
-    }
-
-    function test_executeRemoteMessages_multiBatch() public {
-        (BridgeERC20 mb,) = _deployMintBurnToken("X", "X");
-        Token lr = new Token("LR");
-        lr.transfer(address(bridge), 100 ether);
-        agency.addToken(address(lr), IBridge.BridgeMode.LockRelease);
-
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](3);
-        msgs[0] = _msg(SRC_CID, 1, address(mb), alice, 1 ether);
-        msgs[1] = _msg(SRC_CID, 2, address(lr), alice, 2 ether);
-        msgs[2] = _msg(SRC_CID, 3, address(mb), bob, 3 ether);
-
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        assertEq(mb.balanceOf(alice), 1 ether);
-        assertEq(mb.balanceOf(bob), 3 ether);
-        assertEq(lr.balanceOf(alice), 2 ether);
-        for (uint64 n = 1; n <= 3; ++n) {
-            assertTrue(bridge.inboundConsumed(SRC_CID, n));
-        }
-    }
-
-    function test_executeRemoteMessages_replayEmitsFailedAndContinues() public {
-        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
-
-        // First execution succeeds.
-        IBridge.InboundMessage[] memory msgs1 = new IBridge.InboundMessage[](1);
-        msgs1[0] = _msg(SRC_CID, 1, address(token), bob, 5 ether);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs1);
-        assertEq(token.balanceOf(bob), 5 ether);
-
-        // Second time, same nonce — should emit Failed("replay") and not double-mint.
-        vm.expectEmit(true, false, false, true, address(bridge));
-        emit IBridge.BridgeMessageFailed(SRC_CID, 1, bytes("replay"));
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs1);
-        assertEq(token.balanceOf(bob), 5 ether);
-    }
-
-    function test_executeRemoteMessages_disabledTokenLandsInPending() public {
-        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
-        agency.disableToken(address(token));
-
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msg(SRC_CID, 1, address(token), bob, 5 ether);
-
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        assertEq(token.balanceOf(bob), 0);
-        assertFalse(bridge.inboundConsumed(SRC_CID, 1));
+        // Full struct parked verbatim, including the EL-injected feeRecipient.
         IBridge.InboundMessage memory stored = bridge.pendingMessage(SRC_CID, 1);
+        assertEq(stored.srcChainID, SRC_CID);
+        assertEq(stored.nonce, 1);
         assertEq(stored.localToken, address(token));
         assertEq(stored.recipient, bob);
         assertEq(stored.amount, 5 ether);
-    }
+        assertEq(stored.feeRecipient, proposer);
 
-    function test_executeRemoteMessages_feeExceedsAmountLandsInPending() public {
-        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
-        // 100% fee → computed fee == amount → _computeFee reverts FeeExceedsAmount, so the
-        // message must park in pending (no mint) rather than abort the whole system call.
-        agency.setSpamControl(address(token), 0, 10_000, 0, type(uint256).max);
-
-        uint256 amount = 5 ether;
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, amount, proposer);
-
-        vm.expectEmit(true, false, false, true, address(bridge));
-        emit IBridge.BridgeMessageFailed(SRC_CID, 1, abi.encodeWithSelector(IBridge.FeeExceedsAmount.selector));
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        assertEq(token.balanceOf(bob), 0, "no mint to recipient while fee blocks it");
-        assertEq(token.balanceOf(proposer), 0, "no fee leg while blocked");
-        assertEq(token.totalSupply(), 0, "nothing minted");
+        // Parked, not consumed; watermark advanced; deliverable.
         assertFalse(bridge.inboundConsumed(SRC_CID, 1));
-        assertEq(bridge.pendingMessage(SRC_CID, 1).amount, amount, "parked for retry");
+        assertEq(bridge.lastParkedNonce(SRC_CID), 1);
+        (bool deliverable,,,) = bridge.previewDeliver(SRC_CID, 1);
+        assertTrue(deliverable);
+
+        // No token side effects at park time.
+        assertEq(token.totalSupply(), 0, "park must not mint");
+        assertEq(token.balanceOf(bob), 0);
     }
 
-    function test_executeRemoteMessages_failureInMiddleOfBatchOthersSucceed() public {
-        (BridgeERC20 a,) = _deployMintBurnToken("A", "A");
-        (BridgeERC20 b,) = _deployMintBurnToken("B", "B");
-        agency.disableToken(address(b)); // middle msg will fail
-
+    function test_park_emitsNoEvents() public {
+        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
         IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](3);
-        msgs[0] = _msg(SRC_CID, 1, address(a), alice, 1 ether);
-        msgs[1] = _msg(SRC_CID, 2, address(b), alice, 2 ether);
-        msgs[2] = _msg(SRC_CID, 3, address(a), bob, 3 ether);
+        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), alice, 1 ether, proposer);
+        msgs[1] = _msgWithFee(SRC_CID, 2, address(token), bob, 2 ether, proposer);
+        msgs[2] = _msgWithFee(SRC_CID, 3, address(token), bob, 3 ether, proposer);
 
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        assertEq(a.balanceOf(alice), 1 ether);
-        assertEq(a.balanceOf(bob), 3 ether);
-        assertEq(b.balanceOf(alice), 0);
-        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
-        assertFalse(bridge.inboundConsumed(SRC_CID, 2));
-        assertTrue(bridge.inboundConsumed(SRC_CID, 3));
-        assertEq(bridge.pendingMessage(SRC_CID, 2).amount, 2 ether);
+        vm.recordLogs();
+        _park(msgs);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 0, "park must emit nothing (system-call logs are discarded anyway)");
     }
 
-    /// @notice Two consecutive failing messages in ONE system-call batch must BOTH park (each
-    ///         `_tryDispatch` try/catch is independent). Isolates contract logic from any
-    ///         EL-side gas/precompile-revert interaction observed at integration time.
-    function test_executeRemoteMessages_twoConsecutiveFailuresBothPark() public {
-        (BridgeERC20 a,) = _deployMintBurnToken("A", "A");
-        (BridgeERC20 b,) = _deployMintBurnToken("B", "B");
-        agency.disableToken(address(a));
-        agency.disableToken(address(b));
+    /// @notice Park never consults token config — a disabled or entirely unknown token parks fine.
+    ///         The check moves to deliver time, where a failure is recoverable.
+    function test_park_ignoresTokenConfig() public {
+        address ghost = makeAddr("ghostToken"); // never registered
+        (BridgeERC20 disabled,) = _deployMintBurnToken("D", "D");
+        agency.disableToken(address(disabled));
 
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](3);
-        msgs[0] = _msg(SRC_CID, 1, address(a), alice, 1 ether); // fail
-        msgs[1] = _msg(SRC_CID, 2, address(b), alice, 2 ether); // fail (consecutive)
-        msgs[2] = _msg(SRC_CID, 3, address(a), bob, 3 ether); // fail
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](2);
+        msgs[0] = _msgWithFee(SRC_CID, 1, ghost, bob, 1 ether, proposer);
+        msgs[1] = _msgWithFee(SRC_CID, 2, address(disabled), bob, 2 ether, proposer);
+        _park(msgs);
 
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        // All three parked, none consumed, no tokens minted.
-        for (uint64 nonce = 1; nonce <= 3; ++nonce) {
-            assertFalse(bridge.inboundConsumed(SRC_CID, nonce), "must not consume a failed msg");
-        }
-        assertEq(bridge.pendingMessage(SRC_CID, 1).amount, 1 ether, "msg1 parked");
-        assertEq(bridge.pendingMessage(SRC_CID, 2).amount, 2 ether, "msg2 parked");
-        assertEq(bridge.pendingMessage(SRC_CID, 3).amount, 3 ether, "msg3 parked");
-        assertEq(a.totalSupply(), 0);
-        assertEq(b.totalSupply(), 0);
-
-        // And each is recoverable via retry once unblocked.
-        agency.addToken(address(a), IBridge.BridgeMode.MintBurn);
-        agency.addToken(address(b), IBridge.BridgeMode.MintBurn);
-        bridge.retry(SRC_CID, 1);
-        bridge.retry(SRC_CID, 2);
-        bridge.retry(SRC_CID, 3);
-        assertEq(a.balanceOf(alice), 1 ether);
-        assertEq(b.balanceOf(alice), 2 ether);
-        assertEq(a.balanceOf(bob), 3 ether);
+        assertEq(bridge.pendingMessage(SRC_CID, 1).localToken, ghost);
+        assertEq(bridge.pendingMessage(SRC_CID, 2).localToken, address(disabled));
+        assertEq(bridge.lastParkedNonce(SRC_CID), 2);
     }
 
-    // -------------- destination-side fee distribution --------------
+    /// @notice All-zero garbage (zero token / recipient / amount) still parks — the park loop has
+    ///         no revert path beyond the caller gate, so one bad message can never halt the batch.
+    function test_park_zeroFieldMessage_stillParks() public {
+        _parkOne(_msgWithFee(SRC_CID, 1, address(0), address(0), 0, address(0)));
+        assertFalse(bridge.inboundConsumed(SRC_CID, 1));
+        assertEq(bridge.lastParkedNonce(SRC_CID), 1);
+        IBridge.InboundMessage memory stored = bridge.pendingMessage(SRC_CID, 1);
+        assertEq(stored.nonce, 1);
+        assertEq(stored.amount, 0);
+        // Parked garbage is inert: a zero amount can never out-pay its (zero) fees, so
+        // previewDeliver reports it non-deliverable (0 >= 0 hits the fee-exceeds rule).
+        (bool deliverable,,,) = bridge.previewDeliver(SRC_CID, 1);
+        assertFalse(deliverable);
+    }
 
-    function test_executeRemoteMessages_appliesFeeAndPaysToFeeRecipient_mintBurn() public {
+    function test_park_multiLane_independentWatermarks() public {
         (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
-        // Destination-side: 1% fee, no clamps active for this magnitude.
-        agency.setSpamControl(address(token), 0, 100, 0, type(uint256).max);
+        uint64 laneA = 100;
+        uint64 laneB = 200;
 
-        uint256 amount = 100 ether;
-        uint256 expectedFee = (amount * 100) / 10_000; // 1 ether
-        uint256 toRecipient = amount - expectedFee;
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](4);
+        msgs[0] = _msgWithFee(laneA, 1, address(token), alice, 1 ether, proposer);
+        msgs[1] = _msgWithFee(laneA, 2, address(token), alice, 2 ether, proposer);
+        msgs[2] = _msgWithFee(laneB, 7, address(token), bob, 3 ether, proposer);
+        msgs[3] = _msgWithFee(laneB, 8, address(token), bob, 4 ether, proposer);
+        _park(msgs);
 
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, amount, proposer);
-
-        vm.expectEmit(true, false, false, true, address(bridge));
-        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, toRecipient, proposer, expectedFee);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        assertEq(token.balanceOf(bob), toRecipient, "recipient gets amount minus fee");
-        assertEq(token.balanceOf(proposer), expectedFee, "proposer gets fee");
-        assertEq(token.totalSupply(), amount, "total minted == inbound amount");
-        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
+        assertEq(bridge.lastParkedNonce(laneA), 2);
+        assertEq(bridge.lastParkedNonce(laneB), 8);
+        assertEq(bridge.pendingMessage(laneA, 2).amount, 2 ether);
+        assertEq(bridge.pendingMessage(laneB, 7).amount, 3 ether);
+        assertEq(token.totalSupply(), 0, "park moves no tokens");
     }
 
-    function test_executeRemoteMessages_appliesFeeAndPaysToFeeRecipient_lockRelease() public {
-        Token token = new Token("LR");
-        token.transfer(address(bridge), 1000 ether);
-        agency.addToken(address(token), IBridge.BridgeMode.LockRelease);
-        // Destination-side: 2% fee, no clamps active for this magnitude.
-        agency.setSpamControl(address(token), 0, 200, 0, type(uint256).max);
-
-        uint256 amount = 50 ether;
-        uint256 expectedFee = (amount * 200) / 10_000; // 1 ether
-        uint256 toRecipient = amount - expectedFee;
-
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, amount, proposer);
-
-        vm.expectEmit(true, false, false, true, address(bridge));
-        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, toRecipient, proposer, expectedFee);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        assertEq(token.balanceOf(bob), toRecipient);
-        assertEq(token.balanceOf(proposer), expectedFee);
-        // Bridge balance dropped by full `amount` (recipient + fee both released from escrow).
-        assertEq(token.balanceOf(address(bridge)), 1000 ether - amount);
-        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
-    }
-
-    function test_executeRemoteMessages_skipsFeeWhenZero() public {
+    function test_park_idempotent_skipsAlreadyParked() public {
         (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
-        // No spam control configured → feeBps == 0 && feeMin == 0, fee path is a no-op.
+        _parkOne(_msgWithFee(SRC_CID, 1, address(token), bob, 5 ether, proposer));
+        // Re-park the same (srcCID, nonce) with different contents — must be skipped, not
+        // overwritten (defensive: the CL watermark prevents duplicates reaching the contract).
+        _parkOne(_msgWithFee(SRC_CID, 1, address(token), alice, 7 ether, proposer));
 
-        uint256 amount = 7 ether;
+        IBridge.InboundMessage memory stored = bridge.pendingMessage(SRC_CID, 1);
+        assertEq(stored.recipient, bob, "first park wins");
+        assertEq(stored.amount, 5 ether, "first park wins");
+        assertEq(bridge.lastParkedNonce(SRC_CID), 1);
+    }
 
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, amount, proposer);
-
-        vm.expectEmit(true, false, false, true, address(bridge));
-        // BridgeIn carries the full amount and feeRecipient=0 / fee=0 because the destination
-        // chose not to charge a fee for this token.
-        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, amount, address(0), 0);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        assertEq(token.balanceOf(bob), amount, "recipient gets full amount");
-        assertEq(token.balanceOf(proposer), 0, "proposer gets nothing when feeBps=0");
+    function test_park_idempotent_skipsConsumed() public {
+        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
+        _parkOne(_msgWithFee(SRC_CID, 1, address(token), bob, 5 ether, address(0)));
+        bridge.deliver(SRC_CID, 1);
         assertTrue(bridge.inboundConsumed(SRC_CID, 1));
+        assertEq(token.balanceOf(bob), 5 ether);
+
+        // Re-park after consumption — skipped: no pending entry re-appears, no double delivery.
+        _parkOne(_msgWithFee(SRC_CID, 1, address(token), bob, 5 ether, address(0)));
+        assertEq(bridge.pendingMessage(SRC_CID, 1).amount, 0, "consumed nonce must not re-park");
+        vm.expectRevert(IBridge.AlreadyConsumed.selector);
+        bridge.deliver(SRC_CID, 1);
+        assertEq(token.balanceOf(bob), 5 ether, "no double mint");
     }
 
-    function test_executeRemoteMessages_skipsFeeWhenFeeRecipientZero() public {
+    function test_park_lastParkedNonce_monotonicMax() public {
         (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
-        // Destination configured a 1% fee, but inbound message has feeRecipient = 0x0
-        // (theoretical edge case — shouldn't happen in production because EL always injects
-        // a non-zero coinbase post-MinerReward fork).
-        agency.setSpamControl(address(token), 0, 100, 0, type(uint256).max);
+        _parkOne(_msgWithFee(SRC_CID, 5, address(token), bob, 1 ether, proposer));
+        assertEq(bridge.lastParkedNonce(SRC_CID), 5);
 
-        uint256 amount = 10 ether;
-
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, amount, address(0));
-
-        vm.expectEmit(true, false, false, true, address(bridge));
-        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, amount, address(0), 0);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        // Recipient gets the full amount; no tokens minted to the zero address.
-        assertEq(token.balanceOf(bob), amount);
-        assertEq(token.totalSupply(), amount, "no fee leg minted");
-        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
+        // A lower (but new) nonce parks fine yet never moves the watermark backwards.
+        _parkOne(_msgWithFee(SRC_CID, 3, address(token), bob, 1 ether, proposer));
+        assertEq(bridge.lastParkedNonce(SRC_CID), 5, "watermark is monotonic max");
+        assertEq(bridge.pendingMessage(SRC_CID, 3).amount, 1 ether, "lower nonce still parked");
     }
 
-    function test_executeRemoteMessages_clampsFeeAtMinAndMax() public {
+    /// @notice Over-budget stress: the contract loop has no batch cap — the 128-messages-per-block
+    ///         budget is a CL/EL consensus parameter enforced off-contract. Drive 200 messages
+    ///         (well above the network budget) through one call and verify every one parks.
+    function test_park_largeBatch200_overBudgetStress() public {
         (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
-        // 0.10% bps with a 1 ether floor and a 5 ether ceiling.
-        agency.setSpamControl(address(token), 0, 10, 1 ether, 5 ether);
-
-        // Tiny inbound: raw bps fee = 10 * 10/10_000 = 0.01 ether → clamps up to floor (1 ether).
-        IBridge.InboundMessage[] memory smallMsg = new IBridge.InboundMessage[](1);
-        smallMsg[0] = _msgWithFee(SRC_CID, 1, address(token), alice, 10 ether, proposer);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(smallMsg);
-        assertEq(token.balanceOf(alice), 9 ether, "small: amount - 1 ether floor");
-        assertEq(token.balanceOf(proposer), 1 ether, "small: floor applied");
-
-        // Huge inbound: raw bps fee = 10_000 * 10/10_000 = 10 ether → clamps down to ceiling (5 ether).
-        IBridge.InboundMessage[] memory bigMsg = new IBridge.InboundMessage[](1);
-        bigMsg[0] = _msgWithFee(SRC_CID, 2, address(token), bob, 10_000 ether, proposer);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(bigMsg);
-        assertEq(token.balanceOf(bob), 10_000 ether - 5 ether, "big: amount - 5 ether ceiling");
-        assertEq(token.balanceOf(proposer), 1 ether + 5 ether, "big: ceiling applied (cumulative)");
-    }
-
-    /// @notice Large-batch sanity check. The contract itself has no on-chain batch cap — the
-    ///         48-messages-per-block budget is a CL/EL consensus parameter enforced off-contract.
-    ///         This test deliberately drives 64 messages (above the network budget) through one
-    ///         call to stress the loop boundary; verify every message is delivered without
-    ///         per-message failures and the post-state matches the expected balances and
-    ///         `inboundConsumed` flags.
-    function test_executeRemoteMessages_largeBatch64() public {
-        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
-        uint256 batchSize = 64;
+        uint256 batchSize = 200;
 
         IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](batchSize);
         for (uint256 i = 0; i < batchSize; ++i) {
-            // nonces 1..64, alternating recipients alice / bob, amounts = (i+1) * 0.01 ether.
             address to = (i % 2 == 0) ? alice : bob;
-            msgs[i] = _msg(SRC_CID, uint64(i + 1), address(token), to, (i + 1) * 0.01 ether);
+            msgs[i] = _msgWithFee(SRC_CID, uint64(i + 1), address(token), to, (i + 1) * 0.01 ether, proposer);
         }
+        _park(msgs);
 
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        // Sum of (i+1)*0.01 for i in [0, 64) = (1+2+...+64) * 0.01 ether = 2080 * 0.01 = 20.8 ether.
-        // Even indices (0..62) → alice: sum of 1,3,5,...,63 multiplied by 0.01 = 1024 * 0.01 = 10.24 ether.
-        // Odd indices (1..63) → bob: sum of 2,4,6,...,64 multiplied by 0.01 = 1056 * 0.01 = 10.56 ether.
-        assertEq(token.balanceOf(alice), 10.24 ether, "alice cumulative");
-        assertEq(token.balanceOf(bob), 10.56 ether, "bob cumulative");
-        assertEq(token.totalSupply(), 20.8 ether, "supply = sum of all amounts");
-        for (uint64 n = 1; n <= 64; ++n) {
-            assertTrue(bridge.inboundConsumed(SRC_CID, n), "all nonces consumed");
+        for (uint64 n = 1; n <= batchSize; ++n) {
+            assertFalse(bridge.inboundConsumed(SRC_CID, n), "park consumes nothing");
+            assertEq(bridge.pendingMessage(SRC_CID, n).amount, uint256(n) * 0.01 ether, "every message parked");
         }
-    }
-
-    /// @notice Partial fee config `(feeBps=X, feeMin=0, feeMax=0)` is intentionally treated as
-    ///         "fee disabled": _computeFee falls through the early-return (feeBps != 0), computes
-    ///         the raw bps fee, then clamps it down to feeMax==0 and returns 0. Pinning this so a
-    ///         future refactor that interprets feeMax=0 as "no cap" would loudly fail.
-    function test_executeRemoteMessages_feeBpsWithZeroFeeMax_yieldsZeroFee() public {
-        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
-        agency.setSpamControl(address(token), 0, 100, 0, 0);
-
-        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
-        msgs[0] = _msgWithFee(SRC_CID, 1, address(token), bob, 10 ether, proposer);
-
-        vm.expectEmit(true, false, false, true, address(bridge));
-        emit IBridge.BridgeIn(SRC_CID, 1, address(token), bob, 10 ether, address(0), 0);
-        vm.prank(SYSTEM);
-        bridge.executeRemoteMessages(msgs);
-
-        assertEq(token.balanceOf(bob), 10 ether, "recipient gets full amount when feeMax=0 clamps fee to 0");
-        assertEq(token.balanceOf(proposer), 0, "proposer gets nothing when feeMax=0");
-        assertTrue(bridge.inboundConsumed(SRC_CID, 1));
+        assertEq(bridge.lastParkedNonce(SRC_CID), uint64(batchSize));
+        assertEq(token.totalSupply(), 0, "park moves no tokens");
     }
 }

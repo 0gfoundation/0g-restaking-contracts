@@ -23,6 +23,9 @@ import {Token} from "./mocks/Token.sol";
  *      separately by W0gIntegrationTest to keep this base lean.
  */
 contract BridgeBaseTest is Test {
+    /// @dev EIP-7685-style system caller — the only address allowed to park inbound messages.
+    address internal constant SYSTEM = 0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE;
+
     address internal owner;
     address internal alice;
     address internal bob;
@@ -141,5 +144,49 @@ contract BridgeBaseTest is Test {
             amount: amount,
             feeRecipient: feeRecipient
         });
+    }
+
+    /// @dev Park a batch as the system caller. Delivery tests follow up with `bridge.deliver` /
+    ///      `bridge.deliverBatch` — the park-then-deliver two-step every inbound message takes.
+    function _park(
+        IBridge.InboundMessage[] memory msgs
+    ) internal {
+        vm.prank(SYSTEM);
+        bridge.parkRemoteMessages(msgs);
+    }
+
+    /// @dev Park a single message as the system caller.
+    function _parkOne(
+        IBridge.InboundMessage memory m
+    ) internal {
+        IBridge.InboundMessage[] memory msgs = new IBridge.InboundMessage[](1);
+        msgs[0] = m;
+        _park(msgs);
+    }
+
+    /// @dev Build a 7-field TokenSpamControl. Argument order mirrors the struct.
+    function _cfg(
+        uint256 minCrossOutAmount,
+        uint16 proposerFeeBps,
+        uint256 proposerFeeMin,
+        uint256 proposerFeeMax,
+        uint16 keeperFeeBps,
+        uint256 keeperFeeMin,
+        uint256 keeperFeeMax
+    ) internal pure returns (IBridge.TokenSpamControl memory) {
+        return IBridge.TokenSpamControl({
+            minCrossOutAmount: minCrossOutAmount,
+            proposerFeeBps: proposerFeeBps,
+            proposerFeeMin: proposerFeeMin,
+            proposerFeeMax: proposerFeeMax,
+            keeperFeeBps: keeperFeeBps,
+            keeperFeeMin: keeperFeeMin,
+            keeperFeeMax: keeperFeeMax
+        });
+    }
+
+    /// @dev Empty spam-control config (all-zero) — disables every knob.
+    function _zeroCfg() internal pure returns (IBridge.TokenSpamControl memory) {
+        return _cfg(0, 0, 0, 0, 0, 0, 0);
     }
 }
