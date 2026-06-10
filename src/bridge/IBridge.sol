@@ -5,6 +5,10 @@ pragma solidity ^0.8.25;
  * @title IBridge
  * @notice Interface for the 0G cross-chain bridge contract deployed at a fixed address on every 0G chain.
  * @dev Schema is frozen — fields and binary layout must not change without cross-stream review (CL + EL + contracts).
+ *      Destination-side flow is park-then-deliver: the consensus-driven system call only *parks* inbound
+ *      messages (`parkRemoteMessages`, no token movement, no events), and anyone can later *deliver* them
+ *      via normal transactions (`deliver` / `deliverBatch`) whose token transfers and `BridgeIn` events are
+ *      fully visible to receipts / `eth_getLogs`.
  */
 interface IBridge {
     /// @notice Bridging mode for a registered token.
@@ -19,9 +23,8 @@ interface IBridge {
     /// @notice Inbound message ABI struct, decoded from CL `BridgeMessage` SSZ on the destination side.
     /// @dev Field order is wire-pinned and MUST mirror the EL-side encoder in the bridge crate of 0g-reth.
     ///      `feeRecipient` is NOT part of the SSZ wire format — it is injected by the EL system-call
-    ///      dispatcher per block, equal to `block.coinbase` (proposer withdrawal address). The
-    ///      destination-side fee logic in `executeRemoteMessages` splits `amount` between `recipient`
-    ///      and `feeRecipient` according to the destination chain's `spamControl[localToken]` config.
+    ///      dispatcher per block, equal to `block.coinbase` (proposer withdrawal address). It is stored
+    ///      inside the parked message and paid the destination-side fee at deliver time.
     struct InboundMessage {
         /// Source chain's `chainId` (the chain that emitted the originating `BridgeOut`).
         uint64 srcChainID;
@@ -31,20 +34,22 @@ interface IBridge {
         /// Token address on THIS (destination) chain. The CL poller resolves source-emitted
         /// `remoteToken` to the local mapping before injecting into the SSZ message.
         address localToken;
-        /// Beneficiary on this chain. Receives `amount - fee` after the destination-side fee split.
+        /// Beneficiary on this chain. Receives `amount` minus the destination-side fee, paid at
+        /// deliver time.
         address recipient;
         /// Full inbound amount before the destination-side fee split (i.e. what the source escrowed
-        /// or burned). The dest splits this into `(recipient: amount-fee, feeRecipient: fee)`.
+        /// or burned). The split happens at deliver time, against the spam-control config in effect
+        /// then — not at park time.
         uint256 amount;
         /// Destination block proposer's withdrawal address, EL-injected per block (equal to
-        /// `block.coinbase` post-MinerReward fork). All messages in a block share the same value.
-        /// `address(0)` means "skip fee distribution"; the full `amount` goes to `recipient`.
+        /// `block.coinbase` post-MinerReward fork). All messages parked in a block share the same
+        /// value. `address(0)` means "skip the proposer fee leg"; no value is stuck.
         address feeRecipient;
     }
 
     // ============= Errors =============
 
-    /// @dev `executeRemoteMessages` was invoked by an account other than `SYSTEM_ADDRESS` (0xfff…fe).
+    /// @dev `parkRemoteMessages` was invoked by an account other than `SYSTEM_ADDRESS` (0xfff…fe).
     error NotSystemCaller();
 
     /// @dev User path called against a token whose `tokens[token].enabled` flag is false.
@@ -53,13 +58,13 @@ interface IBridge {
     /// @dev User path called with a mode that does not match `tokens[token].mode`.
     error WrongMode();
 
-    /// @dev `retry` called for a `(srcCID, nonce)` that has no pending message.
+    /// @dev `deliver` called for a `(srcCID, nonce)` that has no parked message.
     error NoPendingMessage();
 
-    /// @dev `retry` called for a `(srcCID, nonce)` whose `inboundConsumed` is already true.
+    /// @dev `deliver` called for a `(srcCID, nonce)` whose `inboundConsumed` is already true.
     error AlreadyConsumed();
 
-    /// @dev `executeOneInternal` called by an account other than the bridge itself.
+    /// @dev Self-call dispatch helper invoked by an account other than the bridge itself.
     error OnlySelf();
 
     /// @dev Configuration setter received the zero address.
@@ -68,12 +73,12 @@ interface IBridge {
     /// @dev User-path call's `amount` is below the configured `minCrossOutAmount` for the token.
     error AmountTooSmall();
 
-    /// @dev `setSpamControl` called with `feeBps` exceeding `MAX_FEE_BPS` (100%).
+    /// @dev `setSpamControl` called with a bps total exceeding `MAX_FEE_BPS` (100%).
     error FeeBpsTooHigh();
 
     /// @dev Destination-side computed (and clamped) fee is greater than or equal to the inbound
-    ///      `amount`. Reverting blocks delivery so the destination admin can fix `spamControl`
-    ///      (e.g. lower `feeMin`) and the message can be retried via `Bridge.retry`.
+    ///      `amount`. Delivery reverts and the message stays parked so the destination admin can
+    ///      fix `spamControl` (e.g. lower `feeMin`); then anyone can deliver it.
     error FeeExceedsAmount();
 
     /// @dev `setSpamControl` called with `feeMin > feeMax`.
@@ -83,7 +88,7 @@ interface IBridge {
     ///      configured. Without the mapping, the emitted `BridgeOut.remoteToken` would be
     ///      `address(0)`, the CL/EL would resolve the destination `localToken` to `address(0)`,
     ///      and the destination message would be permanently non-deliverable (token 0 is always
-    ///      disabled and the stored pending entry can't be repaired by later configuring the
+    ///      disabled and the parked entry can't be repaired by later configuring the
     ///      source mapping). Reject upfront on the source side.
     error RemoteTokenNotMapped();
 
@@ -109,15 +114,18 @@ interface IBridge {
         uint8 mode
     );
 
-    /// @notice Emitted on the destination chain when a remote message is successfully executed.
+    /// @notice Emitted on the destination chain when a parked message is delivered. Emitted by the
+    ///         delivery transaction (`deliver` / `deliverBatch`), so it is fully visible to
+    ///         receipts / `eth_getLogs` — unlike system-call logs, which the EL discards.
     /// @param srcChainID Source chain that produced the message.
     /// @param nonce Per-(srcCID, dstCID) monotonic nonce.
     /// @param localToken Token address on this destination chain.
     /// @param recipient Final receiver on this chain.
-    /// @param amount Amount delivered to `recipient` (i.e. inbound `amount` minus the destination-side fee).
-    /// @param feeRecipient Address that received the fee portion (block proposer's withdrawal address,
-    ///        injected by the EL). `address(0)` if no fee was paid out.
-    /// @param fee Fee paid to `feeRecipient` (zero if `spamControl` is unconfigured or `feeRecipient` is zero).
+    /// @param amount Net amount delivered to `recipient` (inbound amount minus the fee).
+    /// @param feeRecipient Address paid the destination-side fee (block proposer's withdrawal
+    ///        address, EL-injected at park time). `address(0)` if no fee was paid out.
+    /// @param fee Fee paid to `feeRecipient` (zero if `spamControl` is unconfigured or
+    ///        `feeRecipient` is zero).
     event BridgeIn(
         uint64 indexed srcChainID,
         uint64 nonce,
@@ -128,21 +136,14 @@ interface IBridge {
         uint256 fee
     );
 
-    /// @notice Emitted on the destination chain when a remote message fails or is a replay.
-    /// @param reason Failure reason. Three possible encodings depending on origin:
-    ///        - Replay (duplicate nonce already consumed): raw ASCII bytes `"replay"`, NO selector.
-    ///          This path emits directly without going through try/catch.
-    ///        - Disabled-token revert inside `executeOneInternal`: ABI-encoded `Error(string)` from
-    ///          `revert("disabled")` — selector `0x08c379a0` + offset + length + ASCII bytes.
-    ///        - Any other revert surfaced through try/catch: arbitrary revert bytes forwarded
-    ///          verbatim. Includes this contract's own custom errors such as
-    ///          `FeeExceedsAmount()` (4-byte selector with no args), as well as upstream
-    ///          token / precompile reverts which may be `Error(string)`, a custom-error
-    ///          4-byte selector + args, empty bytes, or anything else the failing callee emits.
+    /// @notice Emitted by `deliverBatch` for each message whose delivery attempt failed. The
+    ///         message stays parked; later messages in the batch still attempt.
+    /// @param reason Failure reason: raw revert bytes forwarded verbatim from the failed delivery.
+    ///        May be ABI-encoded `Error(string)` (e.g. `revert("disabled")` for a disabled token),
+    ///        a 4-byte custom-error selector + args (e.g. this contract's `FeeExceedsAmount()` /
+    ///        `NoPendingMessage()` / `AlreadyConsumed()`), upstream token / precompile revert
+    ///        bytes, or empty bytes.
     event BridgeMessageFailed(uint64 indexed srcChainID, uint64 nonce, bytes reason);
-
-    /// @notice Emitted on the destination chain after `retry` is attempted.
-    event BridgeMessageRetried(uint64 indexed srcChainID, uint64 nonce, bool success);
 
     /// @notice Emitted when an admin updates a token's anti-spam controls.
     /// @param token Token whose controls were updated.
@@ -166,29 +167,32 @@ interface IBridge {
 
     // ============= System path =============
 
-    /// @notice Execute a batch of inbound messages.
-    /// @dev Caller must be `SYSTEM_ADDRESS = 0xfff…ffe`. Per-message try/catch isolates failures
-    ///      into `pendingMessages` for permissionless retry.
-    function executeRemoteMessages(
+    /// @notice Park a batch of inbound messages for later permissionless delivery.
+    /// @dev Caller must be `SYSTEM_ADDRESS = 0xfff…ffe`; that gate is the ONLY revert path — the
+    ///      loop body cannot revert, so a full batch always commits within the system-call budget.
+    ///      Per message: skip if already consumed or already parked (defensive idempotency — the
+    ///      CL nonce watermark prevents duplicates reaching the contract); otherwise store it in
+    ///      `pendingMessages` and advance `lastParkedNonce[srcCID]` (monotonic max). NO token
+    ///      calls, NO fee math, NO events (system-call logs are discarded by the EL).
+    function parkRemoteMessages(
         InboundMessage[] calldata msgs
     ) external;
 
-    // ============= Permissionless retry =============
+    // ============= Permissionless delivery =============
 
-    /// @notice Retry a previously-failed inbound message.
-    /// @dev Anyone may call. No-op revert if there is no pending message or it's already consumed.
-    function retry(uint64 srcCID, uint64 nonce) external;
+    /// @notice Deliver a single parked message: compute the destination-side fee, move tokens,
+    ///         mark consumed, emit `BridgeIn`.
+    /// @dev Anyone may call; forwards all gas; reverts with the underlying reason on failure
+    ///      (the message stays parked).
+    function deliver(uint64 srcCID, uint64 nonce) external;
 
-    // ============= Self-call helper =============
-
-    /// @notice Internal try/catch dispatch point, exposed externally for try/catch.
-    /// @dev Reverts unless `msg.sender == address(this)`. Returns the destination-side split
-    ///      `(toRecipient, feeRecipient, fee)` so callers wrapping this in `try ... returns (...)`
-    ///      can emit `BridgeIn` without recomputing the split. When no fee leg is paid (no spam
-    ///      config or `m.feeRecipient == 0x0`), `feeRecipient` is `address(0)` and `fee` is 0.
-    function executeOneInternal(
-        InboundMessage calldata m
-    ) external returns (uint256 toRecipient, address feeRecipient, uint256 fee);
+    /// @notice Deliver a batch of parked messages with per-message try/catch isolation: a failed
+    ///         message emits `BridgeMessageFailed` and stays parked while later ones still attempt.
+    /// @dev Anyone may call. There is deliberately NO per-message gas cap — the caller pays for
+    ///      the whole batch and bears the gas-burn risk of an exceptionally-halting message (e.g.
+    ///      a stateful-precompile failure burns all gas forwarded to the token call). Use
+    ///      `previewDeliver` to pre-filter, and size batches accordingly.
+    function deliverBatch(uint64 srcCID, uint64[] calldata nonces) external;
 
     // ============= Admin (ADMIN_ROLE held by BridgeAgency) =============
 
@@ -216,9 +220,9 @@ interface IBridge {
     /// @dev Only callable by `ADMIN_ROLE` (BridgeAgency). The four fields are stored verbatim and
     ///      applied independently:
     ///        - `minCrossOutAmount` is enforced source-side by `lockAndSend` / `burnAndSend`.
-    ///        - `feeBps / feeMin / feeMax` are applied destination-side inside
-    ///          `executeRemoteMessages`, splitting the inbound `amount` between the recipient and
-    ///          the EL-injected `feeRecipient` (the block proposer's withdrawal address).
+    ///        - `feeBps / feeMin / feeMax` are applied destination-side at deliver time, splitting
+    ///          the inbound `amount` between the recipient and the parked message's `feeRecipient`
+    ///          (the block proposer's withdrawal address, EL-injected at park time).
     ///      Setting all fields to zero disables the controls for the token. Note that `feeMax`
     ///      is a hard cap on the computed fee: with `feeMax == 0` the fee is always 0 even if
     ///      `feeBps` / `feeMin` are nonzero, so charging any fee requires a nonzero `feeMax`.
@@ -237,6 +241,16 @@ interface IBridge {
     ) external;
 
     // ============= Views =============
+
+    /// @notice This chain's chainID as carried in bridge messages (`uint64(block.chainid)`).
+    function localChainID() external view returns (uint64);
+
+    /// @notice Highest nonce ever parked for `srcCID`. Monotonic. Keeper discovery anchor: park
+    ///         emits no events, but per-lane nonces are dense, so a keeper tracks its own
+    ///         delivered watermark and scans `(watermark, lastParkedNonce[srcCID]]`.
+    function lastParkedNonce(
+        uint64 srcCID
+    ) external view returns (uint64);
 
     function tokenConfig(
         address localToken

@@ -35,10 +35,16 @@ interface IBurnable {
  * @notice Cross-chain bridge contract deployed at a fixed address on every 0G chain (primary + satellite).
  * @dev Storage namespace `0g.bridge.Bridge` (ERC-7201). Beacon-upgradeable; no UUPS.
  *      User flow: `lockAndSend` (LockRelease) / `burnAndSend` (MintBurn) emit a `BridgeOut` event.
- *      System flow: CL → EL → SYSTEM_ADDRESS calls `executeRemoteMessages` with decoded
- *      `InboundMessage[]`. Each message is dispatched via try/catch (self external call) so failures
- *      land in `pendingMessages` and don't abort the entire system call. Anyone can later call
- *      `retry` to reattempt a failed message.
+ *      Destination flow is park-then-deliver:
+ *        [park]    CL → EL → SYSTEM_ADDRESS calls `parkRemoteMessages` with decoded `InboundMessage[]`.
+ *                  Each message is only written to `pendingMessages` — no token calls, no fee math,
+ *                  no events (the EL discards system-call logs). The loop has no revert path, so the
+ *                  consensus-critical system call can never halt on a bad message.
+ *        [deliver] anyone calls `deliver` / `deliverBatch` in a normal transaction, which computes
+ *                  the destination-side fee, moves tokens, flips `inboundConsumed`, and emits a
+ *                  `BridgeIn` fully visible to receipts / `eth_getLogs`.
+ *      Block finalization therefore guarantees a message is *claimable*, not delivered; keepers
+ *      discover work by scanning nonces up to `lastParkedNonce[srcCID]` (no events at park time).
  *      The CL strictly enforces per-(srcCID, dstCID) monotonic nonce, so the contract's
  *      `inboundConsumed` mapping is a defensive replay-shield rather than the primary order check.
  */
@@ -55,31 +61,9 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
 
     /// @notice Hard cap on `feeBps` accepted by `setSpamControl`. 10000 = 100% — fees up to
     ///         (but not equal to) the full inbound amount are allowed. A fee equal to or
-    ///         exceeding the inbound amount reverts `FeeExceedsAmount` and lands the message
-    ///         in `pendingMessages` for retry once admin rebalances spam config.
+    ///         exceeding the inbound amount makes delivery revert `FeeExceedsAmount`; the
+    ///         message stays parked until admin rebalances spam config.
     uint16 public constant MAX_FEE_BPS = 10_000;
-
-    /// @notice Per-message gas ceiling for the batched `executeRemoteMessages` system call.
-    ///         Each inbound message is dispatched via `executeOneInternal{gas: PER_MESSAGE_GAS_CAP}`
-    ///         so one message can never drain the whole 30M system-call budget. This matters because
-    ///         a failing token call backed by a stateful precompile (e.g. W0G mint over its cap)
-    ///         returns a precompile *error* — which the EVM treats as an exceptional halt that
-    ///         consumes ALL gas forwarded to it, not a refunding revert. Without this ceiling, two
-    ///         such failures in one block would exhaust the 30M and revert the entire system call,
-    ///         leaving every message in the block neither delivered nor parked (the CL nonce
-    ///         watermark having already advanced) — i.e. unrecoverable. With the ceiling, each
-    ///         failure burns at most this much and lands in `pendingMessages` for retry.
-    ///
-    ///         Sizing: the most expensive *successful* message measured is a W0G MintBurn with a
-    ///         fee (two 100k precompile mints + overhead ≈ 268k); 400k leaves headroom for the
-    ///         63/64 call-forwarding haircut and cold-access variance. The block budget
-    ///         (MaxBridgeMessagesPerBlock = 48, enforced by the CL builder + EL decoder) is chosen
-    ///         so worst case 48 × (400k + ~140k struct-park + overhead) ≈ 26.4M < 30M.
-    ///
-    ///         NOTE: the cap is applied ONLY on the batched system-call path. `retry` is a
-    ///         user-funded single-message tx and forwards all available gas, so a message that
-    ///         genuinely needs more than this ceiling still has an uncapped recovery path.
-    uint256 public constant PER_MESSAGE_GAS_CAP = 400_000;
 
     /// @notice Per-token bridge configuration. Schema-frozen (only enabled flag + mode).
     struct TokenConfig {
@@ -129,9 +113,8 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         /// srcCID => nonce => already-delivered flag. Defensive replay shield; the CL state-transition
         /// also enforces per-(srcCID, dstCID) monotonicity, so this guards against bugs upstream.
         mapping(uint64 => mapping(uint64 => bool)) inboundConsumed;
-        /// srcCID => nonce => message awaiting permissionless retry. Populated when a delivery
-        /// reverts inside `executeOneInternal` (e.g. mint-cap insufficiency); cleared on successful
-        /// `retry`. `inboundConsumed` stays false for these so retry can re-attempt delivery.
+        /// srcCID => nonce => parked message awaiting permissionless delivery. Written by
+        /// `parkRemoteMessages` (the system call); cleared on successful `deliver` / `deliverBatch`.
         mapping(uint64 => mapping(uint64 => InboundMessage)) pendingMessages;
         /// srcCID => nonce => exists-flag for `pendingMessages`. Needed because reading a default-zero
         /// `InboundMessage` from the map can't be distinguished from a real all-zero message.
@@ -139,6 +122,9 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         /// localToken => spam-control knobs. Empty entry means no source-side floor and no
         /// destination-side fee (delivers the full inbound `amount` to `recipient`).
         mapping(address => TokenSpamControl) spamControl;
+        /// srcCID => highest nonce ever parked (monotonic max). Keeper-discovery anchor — park
+        /// emits no events, so keepers scan `(own delivered watermark, lastParkedNonce]` per lane.
+        mapping(uint64 => uint64) lastParkedNonce;
     }
 
     // keccak256(abi.encode(uint256(keccak256("0g.bridge.Bridge")) - 1)) & ~bytes32(uint256(0xff))
@@ -175,8 +161,7 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     /// @inheritdoc IBridge
     /// @dev Source-side anti-spam: rejects inputs below `spamControl[token].minCrossOutAmount`. The
     ///      full `amount` is escrowed and emitted in the `BridgeOut` event. Fee math is performed
-    ///      destination-side inside `executeRemoteMessages`, paid out of the inbound `amount` to the
-    ///      destination block proposer.
+    ///      destination-side at deliver time, paid out of the inbound `amount`.
     function lockAndSend(address token, uint64 dstCID, address recipient, uint256 amount) external nonReentrant {
         if (amount == 0) revert AmountTooSmall();
         BridgeStorage storage $ = _getBridgeStorage();
@@ -228,8 +213,8 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     /// @dev Compute the destination-side fee for an inbound `amount` against `s`. The bps fee is
     ///      `(amount * feeBps) / 10_000`, then clamped to `[feeMin, feeMax]`. Returns 0 when no fee
     ///      knob is configured (`feeBps == 0 && feeMin == 0`). Reverts with `FeeExceedsAmount` if
-    ///      the clamped fee would consume the entire amount — the destination admin can fix the
-    ///      misconfiguration and the message can then be retried via `Bridge.retry`.
+    ///      the clamped fee would consume the entire amount — the message stays parked until the
+    ///      destination admin fixes the misconfiguration, then anyone can deliver it.
     function _computeFee(uint256 amount, TokenSpamControl memory s) internal pure returns (uint256 fee) {
         if (s.feeBps == 0 && s.feeMin == 0) return 0;
         fee = (amount * s.feeBps) / 10_000;
@@ -238,68 +223,79 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         if (fee >= amount) revert FeeExceedsAmount();
     }
 
-    // ============= System path =============
+    // ============= System path (park) =============
 
     /// @inheritdoc IBridge
-    function executeRemoteMessages(
+    function parkRemoteMessages(
         InboundMessage[] calldata msgs
-    ) external nonReentrant {
+    ) external {
         if (msg.sender != SYSTEM_ADDRESS) revert NotSystemCaller();
         BridgeStorage storage $ = _getBridgeStorage();
         uint256 n = msgs.length;
         for (uint256 i = 0; i < n; ++i) {
             InboundMessage calldata m = msgs[i];
-            if ($.inboundConsumed[m.srcChainID][m.nonce]) {
-                emit BridgeMessageFailed(m.srcChainID, m.nonce, bytes("replay"));
+            // Defensive idempotency: the CL nonce watermark prevents duplicates from reaching the
+            // contract; skipping (rather than reverting) keeps the system call halt-free anyway.
+            if ($.inboundConsumed[m.srcChainID][m.nonce] || $.hasPending[m.srcChainID][m.nonce]) {
                 continue;
             }
-            _tryDispatch(m);
+            $.pendingMessages[m.srcChainID][m.nonce] = m;
+            $.hasPending[m.srcChainID][m.nonce] = true;
+            if (m.nonce > $.lastParkedNonce[m.srcChainID]) {
+                $.lastParkedNonce[m.srcChainID] = m.nonce;
+            }
         }
     }
 
-    // ============= Permissionless retry =============
+    // ============= Permissionless delivery =============
 
     /// @inheritdoc IBridge
-    function retry(uint64 srcCID, uint64 nonce) external nonReentrant {
-        BridgeStorage storage $ = _getBridgeStorage();
-        if (!$.hasPending[srcCID][nonce]) revert NoPendingMessage();
-        if ($.inboundConsumed[srcCID][nonce]) revert AlreadyConsumed();
-
-        InboundMessage memory stored = $.pendingMessages[srcCID][nonce];
-        try this.executeOneInternal(stored) returns (uint256 toRecipient, address feeRecipient, uint256 fee) {
-            $.inboundConsumed[srcCID][nonce] = true;
-            delete $.pendingMessages[srcCID][nonce];
-            $.hasPending[srcCID][nonce] = false;
-            emit BridgeIn(srcCID, nonce, stored.localToken, stored.recipient, toRecipient, feeRecipient, fee);
-            emit BridgeMessageRetried(srcCID, nonce, true);
-        } catch (bytes memory reason) {
-            emit BridgeMessageFailed(srcCID, nonce, reason);
-            emit BridgeMessageRetried(srcCID, nonce, false);
-        }
+    function deliver(uint64 srcCID, uint64 nonce) external nonReentrant {
+        // Direct internal dispatch (no try/catch): a failure reverts the whole tx with the
+        // underlying reason, and the message stays parked.
+        _deliverOne(srcCID, nonce);
     }
 
     /// @inheritdoc IBridge
-    /// @dev Externally-callable for try/catch. Reverts unless caller is the bridge itself.
-    ///      Splits inbound `amount` into `toRecipient` (for `m.recipient`) and `fee` (for
-    ///      `m.feeRecipient`, the destination block proposer's withdrawal address injected by
-    ///      the EL). The fee leg is skipped when the destination has no fee configured for
-    ///      `localToken` or when `m.feeRecipient` is the zero address — in those cases the
-    ///      recipient gets the entire `amount`, `feeRecipient` returns as `address(0)`, and
-    ///      `fee` returns as 0. The returned tuple is consumed by the wrapping `try` block to
-    ///      emit `BridgeIn` without recomputing the split.
-    function executeOneInternal(
-        InboundMessage calldata m
-    ) external returns (uint256 toRecipient, address feeRecipient, uint256 fee) {
+    function deliverBatch(uint64 srcCID, uint64[] calldata nonces) external nonReentrant {
+        uint256 n = nonces.length;
+        for (uint256 i = 0; i < n; ++i) {
+            // External self-call so each message's failure is isolated by try/catch. All remaining
+            // gas is forwarded (no per-message cap) — the caller pays and bears halt-burn risk.
+            try this.deliverOneInternal(srcCID, nonces[i]) {}
+            catch (bytes memory reason) {
+                emit BridgeMessageFailed(srcCID, nonces[i], reason);
+            }
+        }
+    }
+
+    /// @notice Self-call dispatch point for `deliverBatch`'s per-message try/catch isolation.
+    /// @dev Reverts unless `msg.sender == address(this)`. Not part of `IBridge` — external only
+    ///      because Solidity try/catch requires an external call.
+    function deliverOneInternal(uint64 srcCID, uint64 nonce) external {
         if (msg.sender != address(this)) revert OnlySelf();
+        _deliverOne(srcCID, nonce);
+    }
+
+    /// @dev Deliver one parked message: checks, fee split, state flip (consumed + pending cleared)
+    ///      BEFORE the token interactions, then the visible `BridgeIn`. Reverts (bubbling the
+    ///      underlying reason) on any failure, leaving the message parked.
+    function _deliverOne(uint64 srcCID, uint64 nonce) internal {
         BridgeStorage storage $ = _getBridgeStorage();
+        if ($.inboundConsumed[srcCID][nonce]) revert AlreadyConsumed();
+        if (!$.hasPending[srcCID][nonce]) revert NoPendingMessage();
+
+        InboundMessage memory m = $.pendingMessages[srcCID][nonce];
         TokenConfig memory cfg = $.tokens[m.localToken];
-        // Bubble up to the outer try/catch as `Error("disabled")` so BridgeMessageFailed.reason
-        // carries the ABI-encoded string downstream consumers (CL/EL, explorer) can decode.
+        // ASCII Error(string) so BridgeMessageFailed.reason carries bytes downstream consumers
+        // (explorer, keeper bots) can decode without this contract's ABI.
         if (!cfg.enabled) revert("disabled");
 
         TokenSpamControl memory s = $.spamControl[m.localToken];
-        fee = _computeFee(m.amount, s);
+        uint256 fee = _computeFee(m.amount, s);
         bool payFee = fee > 0 && m.feeRecipient != address(0);
+        uint256 toRecipient;
+        address feeRecipient;
         if (payFee) {
             toRecipient = m.amount - fee;
             feeRecipient = m.feeRecipient;
@@ -308,6 +304,11 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
             feeRecipient = address(0);
             fee = 0;
         }
+
+        // Effects before interactions: consumed + cleared before any token call.
+        $.inboundConsumed[srcCID][nonce] = true;
+        delete $.pendingMessages[srcCID][nonce];
+        $.hasPending[srcCID][nonce] = false;
 
         if (cfg.mode == BridgeMode.MintBurn) {
             IBurnable(m.localToken).mint(m.recipient, toRecipient);
@@ -320,28 +321,8 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
                 IERC20(m.localToken).safeTransfer(feeRecipient, fee);
             }
         }
-    }
 
-    /// @dev Wrap an InboundMessage execution in try/catch and route success/failure to storage.
-    function _tryDispatch(
-        InboundMessage calldata m
-    ) internal {
-        BridgeStorage storage $ = _getBridgeStorage();
-        try this.executeOneInternal{gas: PER_MESSAGE_GAS_CAP}(m) returns (
-            uint256 toRecipient, address feeRecipient, uint256 fee
-        ) {
-            $.inboundConsumed[m.srcChainID][m.nonce] = true;
-            // Wipe any stale pending entry (defensive — should be impossible under CL nonce rules).
-            if ($.hasPending[m.srcChainID][m.nonce]) {
-                delete $.pendingMessages[m.srcChainID][m.nonce];
-                $.hasPending[m.srcChainID][m.nonce] = false;
-            }
-            emit BridgeIn(m.srcChainID, m.nonce, m.localToken, m.recipient, toRecipient, feeRecipient, fee);
-        } catch (bytes memory reason) {
-            $.pendingMessages[m.srcChainID][m.nonce] = m;
-            $.hasPending[m.srcChainID][m.nonce] = true;
-            emit BridgeMessageFailed(m.srcChainID, m.nonce, reason);
-        }
+        emit BridgeIn(srcCID, nonce, m.localToken, m.recipient, toRecipient, feeRecipient, fee);
     }
 
     // ============= Admin (ADMIN_ROLE) =============
@@ -390,6 +371,18 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     }
 
     // ============= Views =============
+
+    /// @inheritdoc IBridge
+    function localChainID() external view returns (uint64) {
+        return uint64(block.chainid);
+    }
+
+    /// @inheritdoc IBridge
+    function lastParkedNonce(
+        uint64 srcCID
+    ) external view returns (uint64) {
+        return _getBridgeStorage().lastParkedNonce[srcCID];
+    }
 
     /// @inheritdoc IBridge
     function tokenConfig(
