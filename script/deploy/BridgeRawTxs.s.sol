@@ -159,9 +159,12 @@ contract BridgeRawTxs is Script, JsonUtils {
         for (uint256 i = 0; i < 6; i++) {
             signed[i] = unsigned[i];
         }
+        // r/s are RLP integers: minimal big-endian with leading zeros stripped. A fixed-width
+        // 32-byte encoding is non-canonical whenever the top byte is zero (~1/256 per value),
+        // and both geth and reth hard-reject such txs at decode time.
         signed[6] = _rlpUint(v);
-        signed[7] = _rlpBytes(abi.encodePacked(r)); // 32-byte big-endian, kept fixed-width per convention
-        signed[8] = _rlpBytes(abi.encodePacked(s));
+        signed[7] = _rlpUint(uint256(r));
+        signed[8] = _rlpUint(uint256(s));
         return _rlpList(signed);
     }
 
