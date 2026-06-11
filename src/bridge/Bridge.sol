@@ -338,7 +338,10 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
 
     /// @inheritdoc IBridge
     function mapRemoteToken(address localToken, uint64 dstCID, address remoteToken_) external onlyRole(ADMIN_ROLE) {
-        if (localToken == address(0) || remoteToken_ == address(0)) revert ZeroAddress();
+        // remoteToken_ == address(0) is an explicit unmap: it deprecates this single (token, dstCID)
+        // route (lockAndSend/burnAndSend then revert RemoteTokenNotMapped for dstCID) without
+        // touching the token's routes to other chains or its enabled flag.
+        if (localToken == address(0)) revert ZeroAddress();
         BridgeStorage storage $ = _getBridgeStorage();
         $.remoteToken[localToken][dstCID] = remoteToken_;
     }

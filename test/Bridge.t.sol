@@ -154,6 +154,31 @@ contract BridgeUserPathsTest is BridgeBaseTest {
         bridge.burnAndSend(address(token), DST_CID, address(0), 1 ether);
     }
 
+    /// @notice Unmapping a single route (remoteToken_ = address(0)) deprecates just that
+    ///         (token, dstCID): lockAndSend to it reverts, while the token's route to another
+    ///         chain and its enabled flag are untouched.
+    function test_mapRemoteToken_zeroUnmapsSingleRoute() public {
+        (Token token,) = _deployLockReleaseToken(alice, 100 ether); // mapped at DST_CID
+        uint64 otherCID = uint64(7);
+        agency.mapRemote(address(token), otherCID, makeAddr("remoteOther"));
+        vm.prank(alice);
+        token.approve(address(bridge), type(uint256).max);
+
+        // Deprecate the DST_CID route.
+        agency.mapRemote(address(token), DST_CID, address(0));
+        assertEq(bridge.remoteToken(address(token), DST_CID), address(0));
+
+        // That route is now closed...
+        vm.expectRevert(IBridge.RemoteTokenNotMapped.selector);
+        vm.prank(alice);
+        bridge.lockAndSend(address(token), DST_CID, bob, 1 ether);
+
+        // ...but the other route still works (token not disabled).
+        vm.prank(alice);
+        bridge.lockAndSend(address(token), otherCID, bob, 1 ether);
+        assertEq(bridge.outboundNonce(otherCID), 1);
+    }
+
     function test_tokenConfig_view() public {
         (Token token,) = _deployLockReleaseToken(alice, 100 ether);
         (bool enabled, IBridge.BridgeMode mode) = bridge.tokenConfig(address(token));
@@ -197,12 +222,11 @@ contract BridgeUserPathsTest is BridgeBaseTest {
         bridge.burnAndSend(address(token), DST_CID, bob, 1 ether);
     }
 
-    /// @notice Source-side mapping setter must reject the zero remote address, so admins can't
-    ///         re-introduce the unmapped-remote footgun by configuring a mapping to 0.
-    function test_mapRemoteToken_revertsOnZeroRemote() public {
-        (Token token,) = _deployLockReleaseToken(alice, 100 ether);
+    /// @notice The mapping setter still rejects a zero LOCAL token (a malformed mapping), even
+    ///         though a zero REMOTE token is now a valid explicit unmap.
+    function test_mapRemoteToken_revertsOnZeroLocal() public {
         vm.expectRevert(IBridge.ZeroAddress.selector);
-        agency.mapRemote(address(token), uint64(9), address(0));
+        agency.mapRemote(address(0), uint64(9), makeAddr("remote"));
     }
 }
 

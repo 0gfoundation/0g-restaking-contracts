@@ -228,7 +228,10 @@ interface IBridge {
     /// @notice Configure a token's enabled flag and bridging mode.
     function configureToken(address localToken, bool enabled, BridgeMode mode) external;
 
-    /// @notice Map `localToken` to its address on `dstCID`.
+    /// @notice Map `localToken` to its address on `dstCID`. Pass `remoteToken_ == address(0)` to
+    ///         unmap (deprecate) that single route: subsequent `lockAndSend`/`burnAndSend` to
+    ///         `dstCID` revert `RemoteTokenNotMapped`, while the token's routes to other chains and
+    ///         its enabled flag are untouched.
     function mapRemoteToken(address localToken, uint64 dstCID, address remoteToken_) external;
 
     /// @notice Deploy a new `BridgeERC20` BeaconProxy off the shared `BridgeERC20Beacon`.
