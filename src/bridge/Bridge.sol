@@ -146,6 +146,10 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     ///      destination-side at deliver time, paid out of the inbound `amount`.
     function lockAndSend(address token, uint64 dstCID, address recipient, uint256 amount) external nonReentrant {
         if (amount == 0) revert AmountTooSmall();
+        // A zero recipient parks fine on the destination but can never be delivered (release/mint to
+        // address(0) always reverts), so the source funds would be locked with no recovery short of
+        // a contract upgrade. Reject at the source, same rationale as RemoteTokenNotMapped.
+        if (recipient == address(0)) revert ZeroAddress();
         BridgeStorage storage $ = _getBridgeStorage();
         TokenConfig memory cfg = $.tokens[token];
         if (!cfg.enabled) revert TokenDisabled();
@@ -171,6 +175,10 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     ///      full `amount` is burned and emitted in the `BridgeOut` event. Fee math is destination-side.
     function burnAndSend(address token, uint64 dstCID, address recipient, uint256 amount) external nonReentrant {
         if (amount == 0) revert AmountTooSmall();
+        // A zero recipient parks fine on the destination but can never be delivered (release/mint to
+        // address(0) always reverts), so the source funds would be burned with no recovery short of
+        // a contract upgrade. Reject at the source, same rationale as RemoteTokenNotMapped.
+        if (recipient == address(0)) revert ZeroAddress();
         BridgeStorage storage $ = _getBridgeStorage();
         TokenConfig memory cfg = $.tokens[token];
         if (!cfg.enabled) revert TokenDisabled();

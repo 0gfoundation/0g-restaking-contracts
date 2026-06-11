@@ -131,6 +131,29 @@ contract BridgeUserPathsTest is BridgeBaseTest {
         bridge.burnAndSend(address(token), DST_CID, bob, 0);
     }
 
+    /// @notice A zero recipient parks fine on the destination but can never be delivered, so the
+    ///         source funds would be locked with no recovery. Must be rejected at the source.
+    function test_lockAndSend_revertsOnZeroRecipient() public {
+        (Token token,) = _deployLockReleaseToken(alice, 100 ether);
+        vm.prank(alice);
+        token.approve(address(bridge), type(uint256).max);
+        vm.expectRevert(IBridge.ZeroAddress.selector);
+        vm.prank(alice);
+        bridge.lockAndSend(address(token), DST_CID, address(0), 1 ether);
+    }
+
+    /// @notice Same for MintBurn — more critical because the tokens would be burned, not just locked.
+    function test_burnAndSend_revertsOnZeroRecipient() public {
+        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
+        vm.prank(address(bridge));
+        token.mint(alice, 1 ether);
+        vm.prank(alice);
+        token.approve(address(bridge), type(uint256).max);
+        vm.expectRevert(IBridge.ZeroAddress.selector);
+        vm.prank(alice);
+        bridge.burnAndSend(address(token), DST_CID, address(0), 1 ether);
+    }
+
     function test_tokenConfig_view() public {
         (Token token,) = _deployLockReleaseToken(alice, 100 ether);
         (bool enabled, IBridge.BridgeMode mode) = bridge.tokenConfig(address(token));
