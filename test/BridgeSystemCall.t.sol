@@ -48,7 +48,7 @@ contract BridgeSystemCallTest is BridgeBaseTest {
         // Parked, not consumed; watermark advanced; deliverable.
         assertFalse(bridge.inboundConsumed(SRC_CID, 1));
         assertEq(bridge.lastParkedNonce(SRC_CID), 1);
-        (bool deliverable,,,) = bridge.previewDeliver(SRC_CID, 1);
+        (bool deliverable,,,) = _deliverableOracle(SRC_CID, 1);
         assertTrue(deliverable);
 
         // No token side effects at park time.
@@ -95,9 +95,9 @@ contract BridgeSystemCallTest is BridgeBaseTest {
         IBridge.InboundMessage memory stored = bridge.pendingMessage(SRC_CID, 1);
         assertEq(stored.nonce, 1);
         assertEq(stored.amount, 0);
-        // Parked garbage is inert: a zero amount can never out-pay its (zero) fees, so
-        // previewDeliver reports it non-deliverable (0 >= 0 hits the fee-exceeds rule).
-        (bool deliverable,,,) = bridge.previewDeliver(SRC_CID, 1);
+        // Parked garbage is inert: a zero amount can never out-pay its (zero) fees, so the
+        // deliverability oracle reports it non-deliverable (0 >= 0 hits the fee-exceeds rule).
+        (bool deliverable,,,) = _deliverableOracle(SRC_CID, 1);
         assertFalse(deliverable);
     }
 

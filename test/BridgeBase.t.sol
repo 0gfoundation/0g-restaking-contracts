@@ -189,4 +189,49 @@ contract BridgeBaseTest is Test {
     function _zeroCfg() internal pure returns (IBridge.TokenSpamControl memory) {
         return _cfg(0, 0, 0, 0, 0, 0, 0);
     }
+
+    /// @dev Bridge-side deliverability oracle, recomputed purely from public state views. This is
+    ///      the off-chain equivalent of the front-of-`_deliverOne` checks a keeper applies to decide
+    ///      whether a parked message would clear the bridge's own gates, plus the resulting fee
+    ///      split. Applies the identical checks and per-leg fee formula:
+    ///        - not deliverable if the message is already consumed or not parked;
+    ///        - per-leg fee = clamp((amount * bps) / 10_000, [feeMin, feeMax]); leg is 0 when
+    ///          `bps == 0 && feeMin == 0` or `feeMax == 0`; proposer leg forced to 0 when the
+    ///          parked `feeRecipient` is the zero address;
+    ///        - not deliverable if `proposerFee + keeperFee >= amount` (`FeeExceedsAmount`).
+    ///      This does NOT simulate the token calls — a `deliverable == true` message can still
+    ///      revert at deliver time (disabled token, escrow shortfall, token revert).
+    function _deliverableOracle(
+        uint64 srcCID,
+        uint64 nonce
+    ) internal view returns (bool deliverable, uint256 toRecipient, uint256 proposerFee, uint256 keeperFee) {
+        if (bridge.inboundConsumed(srcCID, nonce)) return (false, 0, 0, 0);
+        IBridge.InboundMessage memory m = bridge.pendingMessage(srcCID, nonce);
+        // A never-parked nonce reads back as an all-zero struct; mirror the contract's `!hasPending`
+        // short-circuit. A real parked message always carries a nonzero nonce (the CL assigns nonces
+        // from 1), so a zero nonce read here means "not parked".
+        if (m.nonce == 0) return (false, 0, 0, 0);
+
+        IBridge.TokenSpamControl memory s = bridge.spamControl(m.localToken);
+        proposerFee = _oracleFeeLeg(m.amount, s.proposerFeeBps, s.proposerFeeMin, s.proposerFeeMax);
+        keeperFee = _oracleFeeLeg(m.amount, s.keeperFeeBps, s.keeperFeeMin, s.keeperFeeMax);
+        if (m.feeRecipient == address(0)) proposerFee = 0;
+        if (proposerFee + keeperFee >= m.amount) return (false, 0, 0, 0);
+        return (true, m.amount - proposerFee - keeperFee, proposerFee, keeperFee);
+    }
+
+    /// @dev One fee leg, identical to the contract's `_computeFee`: bps fee clamped to
+    ///      `[feeMin, feeMax]`; zero when the leg is unconfigured (`bps == 0 && feeMin == 0`)
+    ///      and clamped to zero by `feeMax == 0`.
+    function _oracleFeeLeg(
+        uint256 amount,
+        uint16 bps,
+        uint256 feeMin,
+        uint256 feeMax
+    ) private pure returns (uint256 fee) {
+        if (bps == 0 && feeMin == 0) return 0;
+        fee = (amount * bps) / 10_000;
+        if (fee < feeMin) fee = feeMin;
+        if (fee > feeMax) fee = feeMax;
+    }
 }

@@ -363,8 +363,8 @@ contract BridgeSpamControlTest is BridgeBaseTest {
         uint256 amount = 100 ether;
         _parkOne(_msgWithFee(SRC_CID, 1, address(token), bob, amount, proposer));
 
-        (bool deliverable,,,) = bridge.previewDeliver(SRC_CID, 1);
-        assertFalse(deliverable, "preview reports fee-blocked message as non-deliverable");
+        (bool deliverable,,,) = _deliverableOracle(SRC_CID, 1);
+        assertFalse(deliverable, "oracle reports fee-blocked message as non-deliverable");
 
         vm.expectRevert(IBridge.FeeExceedsAmount.selector);
         vm.prank(keeper);
@@ -376,9 +376,9 @@ contract BridgeSpamControlTest is BridgeBaseTest {
 
         // Admin rebalances → anyone can deliver, exactly once, with the new split.
         agency.setSpamControl(address(token), _cfg(0, 100, 0, type(uint256).max, 100, 0, type(uint256).max));
-        (bool ok, uint256 net, uint256 pFee, uint256 kFee) = bridge.previewDeliver(SRC_CID, 1);
+        (bool ok, uint256 net, uint256 pFee, uint256 kFee) = _deliverableOracle(SRC_CID, 1);
         assertTrue(ok);
-        assertEq(net + pFee + kFee, amount, "preview conserves the inbound amount");
+        assertEq(net + pFee + kFee, amount, "oracle split conserves the inbound amount");
 
         vm.prank(keeper);
         bridge.deliver(SRC_CID, 1);
@@ -448,22 +448,26 @@ contract BridgeSpamControlTest is BridgeBaseTest {
         assertEq(token.balanceOf(proposer), 0);
     }
 
-    // -------------- previewDeliver matches actual split --------------
+    // -------------- off-chain fee formula matches actual on-chain split --------------
 
-    function test_previewDeliver_matchesDeliveredSplit() public {
+    /// @notice The fee split a keeper computes off-chain (same bps→clamp[min,max] formula the
+    ///         contract applies in `_deliverOne`) must match what `deliver` actually pays out, under
+    ///         non-trivial per-leg clamping (both legs hit their min/max bounds here). Pins the
+    ///         formula against the contract so a divergence (e.g. clamp-order change) fails loudly.
+    function test_offchainFeeFormula_matchesDeliveredSplit() public {
         (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
         agency.setSpamControl(address(token), _cfg(0, 123, 0.5 ether, 50 ether, 77, 0.25 ether, 20 ether));
 
         uint256 amount = 333 ether;
         _parkOne(_msgWithFee(SRC_CID, 1, address(token), bob, amount, proposer));
-        (bool deliverable, uint256 net, uint256 pFee, uint256 kFee) = bridge.previewDeliver(SRC_CID, 1);
+        (bool deliverable, uint256 net, uint256 pFee, uint256 kFee) = _deliverableOracle(SRC_CID, 1);
         assertTrue(deliverable);
         assertEq(net + pFee + kFee, amount);
 
         vm.prank(keeper);
         bridge.deliver(SRC_CID, 1);
-        assertEq(token.balanceOf(bob), net, "preview net matches delivery");
-        assertEq(token.balanceOf(proposer), pFee, "preview proposer fee matches delivery");
-        assertEq(token.balanceOf(keeper), kFee, "preview keeper fee matches delivery");
+        assertEq(token.balanceOf(bob), net, "off-chain net matches delivery");
+        assertEq(token.balanceOf(proposer), pFee, "off-chain proposer fee matches delivery");
+        assertEq(token.balanceOf(keeper), kFee, "off-chain keeper fee matches delivery");
     }
 }

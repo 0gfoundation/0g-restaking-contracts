@@ -138,8 +138,8 @@ contract BridgeDeliverTest is BridgeBaseTest {
         assertTrue(bridge.inboundConsumed(SRC_CID, 1));
         // Pending cleared.
         assertEq(bridge.pendingMessage(SRC_CID, 1).amount, 0);
-        (bool deliverable,,,) = bridge.previewDeliver(SRC_CID, 1);
-        assertFalse(deliverable, "consumed message no longer previewable");
+        (bool deliverable,,,) = _deliverableOracle(SRC_CID, 1);
+        assertFalse(deliverable, "consumed message no longer deliverable");
     }
 
     function test_deliver_happy_lockRelease() public {
@@ -387,31 +387,5 @@ contract BridgeDeliverTest is BridgeBaseTest {
         vm.expectRevert(IBridge.OnlySelf.selector);
         vm.prank(keeper);
         bridge.deliverOneInternal(SRC_CID, 1, keeper);
-    }
-
-    // -------------- previewDeliver basic states --------------
-
-    function test_previewDeliver_states() public {
-        (BridgeERC20 token,) = _deployMintBurnToken("X", "X");
-
-        // Not parked → not deliverable.
-        (bool deliverable, uint256 toRecipient,,) = bridge.previewDeliver(SRC_CID, 1);
-        assertFalse(deliverable);
-        assertEq(toRecipient, 0);
-
-        // Parked, no fees → full amount.
-        _parkOne(_msgWithFee(SRC_CID, 1, address(token), bob, 5 ether, proposer));
-        uint256 proposerFee;
-        uint256 keeperFee;
-        (deliverable, toRecipient, proposerFee, keeperFee) = bridge.previewDeliver(SRC_CID, 1);
-        assertTrue(deliverable);
-        assertEq(toRecipient, 5 ether);
-        assertEq(proposerFee, 0);
-        assertEq(keeperFee, 0);
-
-        // Consumed → not deliverable.
-        bridge.deliver(SRC_CID, 1);
-        (deliverable,,,) = bridge.previewDeliver(SRC_CID, 1);
-        assertFalse(deliverable);
     }
 }

@@ -88,7 +88,7 @@ contract BridgeInitAndEdgeTest is BridgeBaseTest {
         assertFalse(bridge.inboundConsumed(SRC_CID, 1), "must not be marked consumed on failed release");
         assertEq(bridge.pendingMessage(SRC_CID, 1).amount, 25 ether, "stays parked");
         assertEq(token.balanceOf(bob), 0, "recipient unpaid");
-        (bool deliverable,,,) = bridge.previewDeliver(SRC_CID, 1);
+        (bool deliverable,,,) = _deliverableOracle(SRC_CID, 1);
         assertTrue(deliverable, "bridge-side checks still pass; only the token release is short");
 
         // Top up the escrow so it covers the full inbound amount, then deliver succeeds.

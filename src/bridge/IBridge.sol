@@ -219,8 +219,8 @@ interface IBridge {
     /// @dev Anyone may call (each delivered message pays its keeper fee leg to `msg.sender`).
     ///      There is deliberately NO per-message gas cap — the caller pays for the whole batch
     ///      and bears the gas-burn risk of an exceptionally-halting message (e.g. a
-    ///      stateful-precompile failure burns all gas forwarded to the token call). Use
-    ///      `previewDeliver` to pre-filter, and size batches accordingly.
+    ///      stateful-precompile failure burns all gas forwarded to the token call). Probe
+    ///      deliverability with an `eth_call deliver(srcCID, nonce)` and size batches accordingly.
     function deliverBatch(uint64 srcCID, uint64[] calldata nonces) external;
 
     // ============= Admin (ADMIN_ROLE held by BridgeAgency) =============
@@ -274,21 +274,6 @@ interface IBridge {
     function lastParkedNonce(
         uint64 srcCID
     ) external view returns (uint64);
-
-    /// @notice Preview what delivering `(srcCID, nonce)` would pay out, for keeper pre-filtering.
-    /// @dev `deliverable` is false when the message is not parked, already consumed, or its
-    ///      combined fees would consume the whole amount (`FeeExceedsAmount`). It does NOT
-    ///      simulate token-call success — a `deliverable == true` message can still fail at
-    ///      deliver time (disabled token, mint cap, escrow shortfall, token revert), and state
-    ///      may change between preview and inclusion.
-    /// @return deliverable Whether `deliver` would pass the bridge-side checks above.
-    /// @return toRecipient Net amount the recipient would receive (0 when not deliverable).
-    /// @return proposerFee Proposer leg payout (0 when not deliverable).
-    /// @return keeperFee Keeper leg payout (0 when not deliverable).
-    function previewDeliver(
-        uint64 srcCID,
-        uint64 nonce
-    ) external view returns (bool deliverable, uint256 toRecipient, uint256 proposerFee, uint256 keeperFee);
 
     function tokenConfig(
         address localToken
