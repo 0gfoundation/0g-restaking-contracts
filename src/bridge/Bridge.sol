@@ -229,8 +229,9 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
 
     /// @dev Source-side anti-spam: reject inputs below the configured per-token minimum.
     function _applyAntiSpam(BridgeStorage storage $, address token, uint256 amount) internal view {
-        TokenSpamControl memory s = $.spamControl[token];
-        if (amount < s.minCrossOutAmount) revert AmountTooSmall();
+        // Read only the source-side field (slot 0); copying the whole 7-slot TokenSpamControl to
+        // memory here would SLOAD 6 fee slots that this hot bridge-out path never uses.
+        if (amount < $.spamControl[token].minCrossOutAmount) revert AmountTooSmall();
     }
 
     /// @dev Convert `amount` expressed in `fromDecimals` to the equivalent value in `toDecimals`.

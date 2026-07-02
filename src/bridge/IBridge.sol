@@ -52,21 +52,27 @@ interface IBridge {
     /// @dev Each chain stores all fields because the same token can be source on one route and
     ///      destination on another. Each fee leg is computed independently (bps, then clamp to
     ///      `[min, max]`); `bps == 0 && min == 0` (or `max == 0`) makes that leg charge nothing.
+    /// @dev Field order is chosen so the two `uint16` bps rates sit adjacent and pack into a
+    ///      single storage slot (7 slots → 6). The bps fields lead the min/max fields for that
+    ///      reason, not by leg. `setSpamControl` takes this struct by named fields, but note the
+    ///      ABI tuple order follows this declaration order: (minCrossOutAmount, proposerFeeBps,
+    ///      keeperFeeBps, proposerFeeMin, proposerFeeMax, keeperFeeMin, keeperFeeMax).
     struct TokenSpamControl {
         /// Source-side floor on user-path `amount`. `lockAndSend` / `burnAndSend` revert with
         /// `AmountTooSmall` if `amount < minCrossOutAmount`. Zero disables the floor.
         uint256 minCrossOutAmount;
         /// Proposer leg rate in basis points (10_000 = 100%), paid at deliver time to the parked
-        /// message's `feeRecipient` (the dest-block proposer that packed it).
+        /// message's `feeRecipient` (the dest-block proposer that packed it). Packs with
+        /// `keeperFeeBps` into one slot.
         uint16 proposerFeeBps;
+        /// Keeper leg rate in basis points, paid at deliver time to the `deliver` / `deliverBatch`
+        /// caller (the keeper that lands the delivery tx). Packs with `proposerFeeBps`.
+        uint16 keeperFeeBps;
         /// Proposer leg floor: raw bps fee below this is rounded up.
         uint256 proposerFeeMin;
         /// Proposer leg hard cap. `0` forces the proposer fee to always be 0 — set it nonzero to
         /// actually charge. Must satisfy `proposerFeeMin <= proposerFeeMax`.
         uint256 proposerFeeMax;
-        /// Keeper leg rate in basis points, paid at deliver time to the `deliver` / `deliverBatch`
-        /// caller (the keeper that lands the delivery tx).
-        uint16 keeperFeeBps;
         /// Keeper leg floor: raw bps fee below this is rounded up.
         uint256 keeperFeeMin;
         /// Keeper leg hard cap. `0` forces the keeper fee to always be 0 (no keeper incentive —
