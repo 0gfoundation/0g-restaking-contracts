@@ -126,6 +126,12 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         }
     }
 
+    /// @dev Locks the implementation contract so only proxies are usable — the bare
+    ///      implementation at its deterministic raw-tx address cannot be initialized by anyone.
+    constructor() {
+        _disableInitializers();
+    }
+
     /// @notice Initialize the Bridge.
     /// @param bridgeERC20Beacon_ Address of the shared `UpgradeableBeacon` for BridgeERC20 instances.
     /// @param agency_ Address granted ADMIN_ROLE; typically the BridgeAgency proxy. Handles
@@ -384,6 +390,7 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         if (localToken == address(0)) revert ZeroAddress();
         BridgeStorage storage $ = _getBridgeStorage();
         $.tokens[localToken] = TokenConfig({enabled: enabled, mode: mode});
+        emit TokenConfigured(localToken, enabled, uint8(mode));
     }
 
     /// @inheritdoc IBridge
@@ -394,6 +401,7 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         if (localToken == address(0)) revert ZeroAddress();
         BridgeStorage storage $ = _getBridgeStorage();
         $.remoteToken[localToken][dstCID] = remoteToken_;
+        emit RemoteTokenMapped(localToken, dstCID, remoteToken_);
     }
 
     /// @inheritdoc IBridge

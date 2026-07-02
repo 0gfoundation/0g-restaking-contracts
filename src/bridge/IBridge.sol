@@ -188,7 +188,26 @@ interface IBridge {
     /// @param cfg The full control set now in effect (stored verbatim).
     event SpamControlUpdated(address indexed token, TokenSpamControl cfg);
 
+    /// @notice Emitted when an admin sets a token's `(enabled, mode)` config via `configureToken`.
+    /// @param localToken The token whose config changed.
+    /// @param enabled Whether the token is now enabled for bridging.
+    /// @param mode Bridging mode now in effect (uint8 cast of `BridgeMode`).
+    event TokenConfigured(address indexed localToken, bool enabled, uint8 mode);
+
+    /// @notice Emitted when an admin maps (or unmaps, `remoteToken == 0`) a token's route to a
+    ///         destination chain via `mapRemoteToken`.
+    /// @param localToken The local token being routed.
+    /// @param dstChainID The destination chain the route targets.
+    /// @param remoteToken The destination-chain token address (zero clears the route).
+    event RemoteTokenMapped(address indexed localToken, uint64 indexed dstChainID, address remoteToken);
+
     // ============= User paths =============
+
+    /// @dev NOTE: the bridge assumes standard exact-transfer ERC-20s. Fee-on-transfer and
+    ///      rebasing tokens are NOT supported — the escrow/burn amount is taken to equal the
+    ///      requested amount, so a token that delivers less than requested would leave the
+    ///      LockRelease escrow under-collateralized. Admins must only register such standard
+    ///      tokens; there is no on-chain enforcement.
 
     /// @notice Lock `amount` of `token` and emit a BridgeOut targeting `dstCID`.
     /// @dev Requires `tokens[token].enabled` and `mode == LockRelease`. Pulls via transferFrom.

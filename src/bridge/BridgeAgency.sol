@@ -41,6 +41,12 @@ contract BridgeAgency is Initializable, OwnableUpgradeable {
         }
     }
 
+    /// @dev Locks the implementation contract so only proxies are usable — the bare
+    ///      implementation at its deterministic raw-tx address cannot be initialized by anyone.
+    constructor() {
+        _disableInitializers();
+    }
+
     /// @notice Initialize the agency.
     /// @param bridge_ Address of the Bridge proxy.
     /// @param bridgeERC20Beacon_ Address of the shared BridgeERC20 UpgradeableBeacon.

@@ -28,6 +28,12 @@ contract BridgeERC20 is Initializable, ERC20Upgradeable, AccessControlUpgradeabl
     /// token actually reports, because the bridge reads `decimals()` to size those conversions.
     uint8 private _decimals;
 
+    /// @dev Locks the implementation contract so only beacon proxies are usable — the bare
+    ///      implementation at its deterministic raw-tx address cannot be initialized by anyone.
+    constructor() {
+        _disableInitializers();
+    }
+
     /// @notice Initializes the token and grants admin + minter roles to the Bridge.
     /// @param name_ ERC-20 name.
     /// @param symbol_ ERC-20 symbol.
