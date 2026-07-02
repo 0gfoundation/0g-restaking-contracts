@@ -7,8 +7,8 @@ import {Script} from "forge-std/Script.sol";
 /// @notice Stable Foundry entrypoint that re-exports the 8 pre-signed bridge raw txs to
 ///         downstream chain-spec tooling. The raw txs themselves are generated offline by
 ///         `BridgeRawTxs.s.sol` from a single throwaway private key (signed once, key
-///         discarded), then broadcast by `integration-tests/scripts/deploy-bridge-raw.sh`
-///         (devnet) or equivalent chain-spec genesis tooling (prod). The deterministic
+///         discarded), then broadcast in nonce order via `eth_sendRawTransaction` by the chain
+///         bring-up tooling (devnet) or the chain-spec genesis tooling (prod). The deterministic
 ///         addresses are byte-identical across every 0G chain.
 ///
 ///         Bridge contract address allocation (single deployer, sequential nonces):
