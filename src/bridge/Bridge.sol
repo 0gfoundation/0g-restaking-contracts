@@ -6,6 +6,7 @@ import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/acce
 import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {BeaconProxy} from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IBridge} from "./IBridge.sol";
@@ -64,6 +65,13 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     ///         Combined fees equal to or exceeding the inbound amount make delivery revert
     ///         `FeeExceedsAmount`; the message stays parked until admin rebalances spam config.
     uint16 public constant MAX_FEE_BPS = 10_000;
+
+    /// Canonical decimals of the cross-chain wire representation. Every BridgeOut event / inbound
+    /// message carries the transferred value normalized to this many decimals, independent of the
+    /// source or destination token's own decimals. The source converts native→wire before
+    /// emitting, the destination converts wire→native at deliver time (see `_convertDecimals`),
+    /// so the two chains' tokens need not share decimals.
+    uint8 public constant WIRE_DECIMALS = 18;
 
     /// @notice Per-token bridge configuration. Schema-frozen (only enabled flag + mode).
     struct TokenConfig {
@@ -159,9 +167,17 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
 
         _applyAntiSpam($, token, amount);
 
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        // Normalize to the 18-decimals wire representation. `sendAmount` is the native amount
+        // actually escrowed — for tokens with > 18 decimals it drops the sub-wire dust so it
+        // isn't locked with no way to release; for <= 18 decimals it equals `amount`.
+        uint8 srcDecimals = IERC20Metadata(token).decimals();
+        uint256 wireAmount = _convertDecimals(amount, srcDecimals, WIRE_DECIMALS);
+        if (wireAmount == 0) revert AmountTooSmall();
+        uint256 sendAmount = _convertDecimals(wireAmount, WIRE_DECIMALS, srcDecimals);
+
+        IERC20(token).safeTransferFrom(msg.sender, address(this), sendAmount);
         uint64 nonce = ++$.outboundNonce[dstCID];
-        emit BridgeOut(uint64(block.chainid), dstCID, nonce, token, remote, recipient, amount, uint8(cfg.mode));
+        emit BridgeOut(uint64(block.chainid), dstCID, nonce, token, remote, recipient, wireAmount, uint8(cfg.mode));
     }
 
     /// @inheritdoc IBridge
@@ -171,8 +187,11 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     ///      `precompile.burn(msg.sender, ..)`, where msg.sender == Bridge). BridgeERC20 template
     ///      matches the same interface.
     ///
-    ///      Source-side anti-spam: rejects inputs below `spamControl[token].minCrossOutAmount`. The
-    ///      full `amount` is burned and emitted in the `BridgeOut` event. Fee math is destination-side.
+    ///      Source-side anti-spam: rejects inputs below `spamControl[token].minCrossOutAmount`.
+    ///      `amount` is normalized to the 18-decimals wire precision: the burned native amount is
+    ///      the wire value converted back to the token (dropping sub-wire dust for > 18-decimals
+    ///      tokens), and the `BridgeOut` event carries the 18-decimals wire amount. Fee math is
+    ///      destination-side, in the destination token's native decimals.
     function burnAndSend(address token, uint64 dstCID, address recipient, uint256 amount) external nonReentrant {
         if (amount == 0) revert AmountTooSmall();
         // A zero recipient parks fine on the destination but can never be delivered (release/mint to
@@ -188,16 +207,40 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
 
         _applyAntiSpam($, token, amount);
 
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        IBurnable(token).burn(amount);
+        // Normalize to the 18-decimals wire representation. `sendAmount` is the native amount
+        // actually burned — for tokens with > 18 decimals it drops the sub-wire dust so it isn't
+        // burned with nothing crossing; for <= 18 decimals it equals `amount`.
+        uint8 srcDecimals = IERC20Metadata(token).decimals();
+        uint256 wireAmount = _convertDecimals(amount, srcDecimals, WIRE_DECIMALS);
+        if (wireAmount == 0) revert AmountTooSmall();
+        uint256 sendAmount = _convertDecimals(wireAmount, WIRE_DECIMALS, srcDecimals);
+
+        IERC20(token).safeTransferFrom(msg.sender, address(this), sendAmount);
+        IBurnable(token).burn(sendAmount);
         uint64 nonce = ++$.outboundNonce[dstCID];
-        emit BridgeOut(uint64(block.chainid), dstCID, nonce, token, remote, recipient, amount, uint8(cfg.mode));
+        emit BridgeOut(uint64(block.chainid), dstCID, nonce, token, remote, recipient, wireAmount, uint8(cfg.mode));
     }
 
     /// @dev Source-side anti-spam: reject inputs below the configured per-token minimum.
     function _applyAntiSpam(BridgeStorage storage $, address token, uint256 amount) internal view {
         TokenSpamControl memory s = $.spamControl[token];
         if (amount < s.minCrossOutAmount) revert AmountTooSmall();
+    }
+
+    /// @dev Convert `amount` expressed in `fromDecimals` to the equivalent value in `toDecimals`.
+    ///      Scaling up (toDecimals > fromDecimals) is exact; scaling down truncates the
+    ///      sub-`toDecimals` remainder (integer division). This is the single primitive behind
+    ///      both directions of the wire normalization: native→wire uses `(tokenDecimals,
+    ///      WIRE_DECIMALS)`, wire→native uses `(WIRE_DECIMALS, tokenDecimals)`. Round-tripping an
+    ///      amount native→wire→native yields the largest native amount that survives the wire's
+    ///      precision (only < original when `fromDecimals > WIRE_DECIMALS`), letting the source
+    ///      lock/burn exactly what can cross and leave the untransferable dust with the user.
+    function _convertDecimals(uint256 amount, uint8 fromDecimals, uint8 toDecimals) internal pure returns (uint256) {
+        if (fromDecimals == toDecimals) return amount;
+        if (toDecimals > fromDecimals) {
+            return amount * (10 ** uint256(toDecimals - fromDecimals));
+        }
+        return amount / (10 ** uint256(fromDecimals - toDecimals));
     }
 
     /// @dev Compute ONE destination-side fee leg for an inbound `amount`. The bps fee is
@@ -292,12 +335,19 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
         // (explorer, keeper bots) can decode without this contract's ABI.
         if (!cfg.enabled) revert("disabled");
 
+        // The parked `m.amount` is the 18-decimals wire value; convert it back to this token's
+        // native decimals before any fee math or transfer. Bridging to a lower-decimals token
+        // truncates the sub-native remainder (inherent to the precision gap). Fees are computed
+        // and the BridgeIn event is emitted in native decimals, matching the admin's per-token
+        // `spamControl` config and the token the recipient actually receives.
+        uint256 amount = _convertDecimals(m.amount, WIRE_DECIMALS, IERC20Metadata(m.localToken).decimals());
+
         TokenSpamControl memory s = $.spamControl[m.localToken];
-        uint256 proposerFee = _computeFee(m.amount, s.proposerFeeBps, s.proposerFeeMin, s.proposerFeeMax);
-        uint256 keeperFee = _computeFee(m.amount, s.keeperFeeBps, s.keeperFeeMin, s.keeperFeeMax);
+        uint256 proposerFee = _computeFee(amount, s.proposerFeeBps, s.proposerFeeMin, s.proposerFeeMax);
+        uint256 keeperFee = _computeFee(amount, s.keeperFeeBps, s.keeperFeeMin, s.keeperFeeMax);
         if (m.feeRecipient == address(0)) proposerFee = 0;
-        if (proposerFee + keeperFee >= m.amount) revert FeeExceedsAmount();
-        uint256 toRecipient = m.amount - proposerFee - keeperFee;
+        if (proposerFee + keeperFee >= amount) revert FeeExceedsAmount();
+        uint256 toRecipient = amount - proposerFee - keeperFee;
 
         // Effects before interactions: consumed + cleared before any token call.
         $.inboundConsumed[srcCID][nonce] = true;
@@ -350,10 +400,13 @@ contract Bridge is IBridge, Initializable, AccessControlUpgradeable, ReentrancyG
     function deployBridgeERC20(
         string memory name_,
         string memory symbol_,
+        uint8 decimals_,
         bytes32 salt
     ) external onlyRole(ADMIN_ROLE) returns (address localToken) {
         BridgeStorage storage $ = _getBridgeStorage();
-        bytes memory init = abi.encodeCall(BridgeERC20.initialize, (name_, symbol_, address(this)));
+        // decimals_ is the local token's decimals; it may differ from the source token's because
+        // the bridge normalizes cross-chain amounts through an 18-decimals wire (_convertDecimals).
+        bytes memory init = abi.encodeCall(BridgeERC20.initialize, (name_, symbol_, decimals_, address(this)));
         localToken = address(new BeaconProxy{salt: salt}($.bridgeERC20Beacon, init));
     }
 

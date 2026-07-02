@@ -36,9 +36,10 @@ interface IBridge {
         address localToken;
         /// Beneficiary on this chain. Receives `amount` minus both fee legs, paid at deliver time.
         address recipient;
-        /// Full inbound amount before the destination-side fee split (i.e. what the source escrowed
-        /// or burned). The split happens at deliver time, against the spam-control config in effect
-        /// then — not at park time.
+        /// Inbound amount, normalized to `WIRE_DECIMALS` (18) — the canonical cross-chain wire
+        /// precision, independent of either token's decimals. Delivery converts it back to this
+        /// chain's token decimals, then splits off the fee legs (against the spam-control config
+        /// in effect at deliver time, not park time).
         uint256 amount;
         /// Destination block proposer's withdrawal address, EL-injected per block (equal to
         /// `block.coinbase` post-MinerReward fork). All messages parked in a block share the same
@@ -130,7 +131,9 @@ interface IBridge {
     /// @param localToken Token address on the source chain.
     /// @param remoteToken Token address on the destination chain (looked up at emit time).
     /// @param recipient Receiver address on the destination chain.
-    /// @param amount Transferred amount (uint256).
+    /// @param amount Transferred amount, normalized to `WIRE_DECIMALS` (18) — NOT the source
+    ///        token's native units. The destination converts it back to its own token decimals at
+    ///        deliver time, so the two chains' tokens need not share decimals.
     /// @param mode Bridging mode of the source-chain token (uint8 cast of `BridgeMode`).
     event BridgeOut(
         uint64 indexed srcChainID,
@@ -146,7 +149,9 @@ interface IBridge {
     /// @notice Emitted on the destination chain when a parked message is delivered. Emitted by the
     ///         delivery transaction (`deliver` / `deliverBatch`), so it is fully visible to
     ///         receipts / `eth_getLogs` — unlike system-call logs, which the EL discards.
-    ///         Conservation: `amount + proposerFee + keeperFee == inbound amount`.
+    ///         All amounts are in this chain's token decimals (the parked `WIRE_DECIMALS` amount
+    ///         is converted to native before the split). Conservation, in native decimals:
+    ///         `amount + proposerFee + keeperFee == wire amount converted to this token`.
     /// @param srcChainID Source chain that produced the message.
     /// @param nonce Per-(srcCID, dstCID) monotonic nonce.
     /// @param localToken Token address on this destination chain.
@@ -241,10 +246,14 @@ interface IBridge {
     ///      same `(name, symbol, salt)` — useful for keeping a bridged token at the same
     ///      address everywhere it's deployed. Reverts if a contract already exists at the
     ///      target address (same `(name, symbol, salt)` used twice on the same chain).
+    /// @param decimals_ Decimals for the deployed BridgeERC20. May differ from the source token's
+    ///        decimals — the bridge normalizes cross-chain amounts through an 18-decimals wire and
+    ///        converts back to this token's decimals on delivery (see `_convertDecimals`).
     /// @return localToken Address of the newly deployed BridgeERC20.
     function deployBridgeERC20(
         string memory name,
         string memory symbol,
+        uint8 decimals_,
         bytes32 salt
     ) external returns (address localToken);
 

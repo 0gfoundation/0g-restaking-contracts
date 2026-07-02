@@ -67,16 +67,27 @@ contract BridgeAgency is Initializable, OwnableUpgradeable {
     /// @notice Deploy a new BridgeERC20 BeaconProxy and register it as MintBurn in one tx.
     /// @dev Uses CREATE2 via `Bridge.deployBridgeERC20`. Operators on multiple chains who want
     ///      the same bridged token to land at the same address must pass identical `(name,
-    ///      symbol, salt)` and operate on chains where Bridge + BridgeERC20Beacon already share
-    ///      addresses (the case under the Nick-method genesis deployment).
+    ///      symbol, decimals_, salt)` and operate on chains where Bridge + BridgeERC20Beacon
+    ///      already share addresses (the case under the Nick-method genesis deployment).
+    ///
+    ///      DECIMALS: the bridge does NOT require matching decimals across chains. It normalizes
+    ///      every cross-chain amount to an 18-decimals wire representation on the source and
+    ///      converts back to the local token's decimals on delivery (Bridge `_convertDecimals`),
+    ///      so a 6-decimals USDT on one chain and its BridgeERC20 twin here can use different
+    ///      decimals. `decimals_` is simply the decimals this twin should report; pick what suits
+    ///      the local representation (commonly the source token's, for display parity). Bridging
+    ///      to a lower-decimals token truncates sub-precision dust, which is inherent to the
+    ///      precision gap.
+    /// @param decimals_ Decimals the deployed BridgeERC20 reports (need not match the source token).
     /// @return localToken Address of the newly deployed BridgeERC20.
     function deployAndAddBridgeToken(
         string memory name,
         string memory symbol,
+        uint8 decimals_,
         bytes32 salt
     ) external onlyOwner returns (address localToken) {
         AgencyStorage storage $ = _getAgencyStorage();
-        localToken = IBridge($.bridge).deployBridgeERC20(name, symbol, salt);
+        localToken = IBridge($.bridge).deployBridgeERC20(name, symbol, decimals_, salt);
         IBridge($.bridge).configureToken(localToken, true, IBridge.BridgeMode.MintBurn);
     }
 

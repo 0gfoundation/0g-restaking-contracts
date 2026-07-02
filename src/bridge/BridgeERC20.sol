@@ -21,16 +21,37 @@ contract BridgeERC20 is Initializable, ERC20Upgradeable, AccessControlUpgradeabl
     /// @dev Role required to mint or burn. Granted to the Bridge proxy on init.
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
+    /// Decimals this token reports, set once at init and returned by `decimals()`. The bridge
+    /// normalizes every cross-chain amount to an 18-decimals wire representation and converts it
+    /// back to the local token's decimals on delivery (see Bridge `_convertDecimals`), so this
+    /// need NOT match the token's decimals on other chains — but it MUST be the decimals this
+    /// token actually reports, because the bridge reads `decimals()` to size those conversions.
+    uint8 private _decimals;
+
     /// @notice Initializes the token and grants admin + minter roles to the Bridge.
     /// @param name_ ERC-20 name.
     /// @param symbol_ ERC-20 symbol.
+    /// @param decimals_ ERC-20 decimals for this bridged token. Chosen by the deployer for the
+    ///        local representation; the bridge normalizes amounts through an 18-decimals wire, so
+    ///        it may differ from the source token's decimals (see Bridge `_convertDecimals`).
     /// @param bridge The Bridge proxy address. Receives DEFAULT_ADMIN_ROLE and MINTER_ROLE.
-    function initialize(string memory name_, string memory symbol_, address bridge) external initializer {
+    function initialize(
+        string memory name_,
+        string memory symbol_,
+        uint8 decimals_,
+        address bridge
+    ) external initializer {
         if (bridge == address(0)) revert IBridge.ZeroAddress();
         __ERC20_init(name_, symbol_);
         __AccessControl_init();
+        _decimals = decimals_;
         _grantRole(DEFAULT_ADMIN_ROLE, bridge);
         _grantRole(MINTER_ROLE, bridge);
+    }
+
+    /// @notice ERC-20 decimals, fixed at init to match the mirrored source token (see `_decimals`).
+    function decimals() public view override returns (uint8) {
+        return _decimals;
     }
 
     /// @notice Mints `amount` to `to`. Restricted to the Bridge.

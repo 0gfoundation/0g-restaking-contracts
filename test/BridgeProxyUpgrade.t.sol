@@ -60,9 +60,9 @@ contract BridgeProxyUpgradeTest is BridgeBaseTest {
 
     function test_bridgeERC20Beacon_upgradeAffectsAllInstances() public {
         // Deploy 3 BridgeERC20 instances via the agency.
-        address t1 = agency.deployAndAddBridgeToken("A", "A", bytes32(uint256(1)));
-        address t2 = agency.deployAndAddBridgeToken("B", "B", bytes32(uint256(2)));
-        address t3 = agency.deployAndAddBridgeToken("C", "C", bytes32(uint256(3)));
+        address t1 = agency.deployAndAddBridgeToken("A", "A", 18, bytes32(uint256(1)));
+        address t2 = agency.deployAndAddBridgeToken("B", "B", 18, bytes32(uint256(2)));
+        address t3 = agency.deployAndAddBridgeToken("C", "C", 18, bytes32(uint256(3)));
 
         // Pre-upgrade: version() doesn't exist on the V1 impl — calling fails.
         (bool ok,) = t1.staticcall(abi.encodeWithSignature("version()"));

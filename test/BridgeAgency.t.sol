@@ -28,7 +28,7 @@ contract BridgeAgencyTest is BridgeBaseTest {
     function test_deployAndAddBridgeToken_onlyOwner() public {
         vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, alice));
         vm.prank(alice);
-        agency.deployAndAddBridgeToken("X", "X", bytes32(0));
+        agency.deployAndAddBridgeToken("X", "X", 18, bytes32(0));
     }
 
     function test_mapRemote_onlyOwner() public {
@@ -46,7 +46,7 @@ contract BridgeAgencyTest is BridgeBaseTest {
     }
 
     function test_deployAndAddBridgeToken_grantsMinterRole() public {
-        address t = agency.deployAndAddBridgeToken("Sat USDT", "satUSDT", bytes32(0));
+        address t = agency.deployAndAddBridgeToken("Sat USDT", "satUSDT", 18, bytes32(0));
         BridgeERC20 token = BridgeERC20(t);
 
         assertTrue(token.hasRole(token.MINTER_ROLE(), address(bridge)));
@@ -66,7 +66,7 @@ contract BridgeAgencyTest is BridgeBaseTest {
     }
 
     function test_deployAndAddBridgeToken_registersAsMintBurn() public {
-        address t = agency.deployAndAddBridgeToken("Sat", "S", bytes32(0));
+        address t = agency.deployAndAddBridgeToken("Sat", "S", 18, bytes32(0));
         (bool enabled, IBridge.BridgeMode mode) = bridge.tokenConfig(t);
         assertTrue(enabled);
         assertEq(uint8(mode), uint8(IBridge.BridgeMode.MintBurn));
@@ -126,18 +126,18 @@ contract BridgeAgencyTest is BridgeBaseTest {
     /// produce the same token address — the cross-chain consistency property we want.
     function test_deployAndAddBridgeToken_addressIsDeterministic() public {
         bytes32 salt = bytes32(uint256(0x42));
-        bytes memory init = abi.encodeCall(BridgeERC20.initialize, ("Det", "DET", address(bridge)));
+        bytes memory init = abi.encodeCall(BridgeERC20.initialize, ("Det", "DET", 18, address(bridge)));
         bytes memory initCode = abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(bridgeERC20Beacon, init));
         address predicted = vm.computeCreate2Address(salt, keccak256(initCode), address(bridge));
 
-        address actual = agency.deployAndAddBridgeToken("Det", "DET", salt);
+        address actual = agency.deployAndAddBridgeToken("Det", "DET", 18, salt);
         assertEq(actual, predicted, "deployed address must equal CREATE2 prediction");
     }
 
     /// Different salts with otherwise identical parameters land at different addresses.
     function test_deployAndAddBridgeToken_differentSaltsGiveDifferentAddresses() public {
-        address a = agency.deployAndAddBridgeToken("Same", "SAME", bytes32(uint256(1)));
-        address b = agency.deployAndAddBridgeToken("Same", "SAME", bytes32(uint256(2)));
+        address a = agency.deployAndAddBridgeToken("Same", "SAME", 18, bytes32(uint256(1)));
+        address b = agency.deployAndAddBridgeToken("Same", "SAME", 18, bytes32(uint256(2)));
         assertTrue(a != b, "different salts must produce different addresses");
     }
 
@@ -145,9 +145,9 @@ contract BridgeAgencyTest is BridgeBaseTest {
     /// "address already taken" rule and reverts.
     function test_deployAndAddBridgeToken_collisionReverts() public {
         bytes32 salt = bytes32(uint256(0xCAFE));
-        agency.deployAndAddBridgeToken("Col", "COL", salt);
+        agency.deployAndAddBridgeToken("Col", "COL", 18, salt);
         vm.expectRevert();
-        agency.deployAndAddBridgeToken("Col", "COL", salt);
+        agency.deployAndAddBridgeToken("Col", "COL", 18, salt);
     }
 
     // ============= BridgeERC20 init zero guard =============
@@ -158,7 +158,7 @@ contract BridgeAgencyTest is BridgeBaseTest {
     function test_bridgeERC20_initialize_revertsZeroBridge() public {
         BridgeERC20 impl = new BridgeERC20();
         UpgradeableBeacon beacon = new UpgradeableBeacon(address(impl), owner);
-        bytes memory init = abi.encodeCall(BridgeERC20.initialize, ("Tok", "TOK", address(0)));
+        bytes memory init = abi.encodeCall(BridgeERC20.initialize, ("Tok", "TOK", 18, address(0)));
         vm.expectRevert(IBridge.ZeroAddress.selector);
         new BeaconProxy(address(beacon), init);
     }

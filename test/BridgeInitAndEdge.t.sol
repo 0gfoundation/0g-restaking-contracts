@@ -61,10 +61,10 @@ contract BridgeInitAndEdgeTest is BridgeBaseTest {
     }
 
     function test_bridgeERC20_reinitializeReverts() public {
-        address t = agency.deployAndAddBridgeToken("RE", "RE", bytes32(uint256(0xACE)));
+        address t = agency.deployAndAddBridgeToken("RE", "RE", 18, bytes32(uint256(0xACE)));
         BridgeERC20 token = BridgeERC20(t);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        token.initialize("RE", "RE", address(bridge));
+        token.initialize("RE", "RE", 18, address(bridge));
     }
 
     // ============= LockRelease escrow shortfall keeps message parked =============
@@ -116,7 +116,7 @@ contract BridgeInitAndEdgeTest is BridgeBaseTest {
 ///         test, a non-minter caller must revert. Only the Bridge holds MINTER_ROLE.
 contract BridgeERC20BurnAuthTest is BridgeBaseTest {
     function test_burn_revertsForNonMinter() public {
-        address t = agency.deployAndAddBridgeToken("BN", "BN", bytes32(uint256(0xB1)));
+        address t = agency.deployAndAddBridgeToken("BN", "BN", 18, bytes32(uint256(0xB1)));
         BridgeERC20 token = BridgeERC20(t);
 
         // Give the bridge a balance so the only thing that can fail is the role check.

@@ -209,7 +209,7 @@ contract BridgeUserPathsTest is BridgeBaseTest {
     ///         user's tokens would be burned (not just locked) before the message went pending.
     function test_burnAndSend_revertsIfRemoteNotMapped() public {
         bytes32 salt = keccak256("noMapping");
-        address t = agency.deployAndAddBridgeToken("X", "X", salt);
+        address t = agency.deployAndAddBridgeToken("X", "X", 18, salt);
         BridgeERC20 token = BridgeERC20(t);
         // Note: agency.mapRemote NOT called.
 
@@ -258,6 +258,6 @@ contract BridgeAdminEntrypointTest is BridgeBaseTest {
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, alice, bridge.ADMIN_ROLE())
         );
         vm.prank(alice);
-        bridge.deployBridgeERC20("X", "X", bytes32(0));
+        bridge.deployBridgeERC20("X", "X", 18, bytes32(0));
     }
 }

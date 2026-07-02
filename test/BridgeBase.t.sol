@@ -107,7 +107,7 @@ contract BridgeBaseTest is Test {
         string memory symbol
     ) internal returns (BridgeERC20 token, address remote) {
         bytes32 salt = keccak256(abi.encode(name, symbol));
-        address t = agency.deployAndAddBridgeToken(name, symbol, salt);
+        address t = agency.deployAndAddBridgeToken(name, symbol, 18, salt);
         token = BridgeERC20(t);
         remote = makeAddr(string.concat("remote-", symbol));
         agency.mapRemote(t, DST_CID, remote);
