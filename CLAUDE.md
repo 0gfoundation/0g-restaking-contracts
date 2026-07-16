@@ -123,6 +123,53 @@ forge script script/deploy/ZeroGravity.s.sol --rpc-url "$ETH_RPC" --broadcast --
 forge script script/deploy/Rewarder.s.sol --rpc-url "$ZG_RPC" --broadcast --slow
 ```
 
+### Bridge: deterministic raw-tx deployment (throwaway-key model)
+
+`script/deploy/BridgeRawTxs.s.sol` generates the deploy: it signs the 8 Bridge-stack deploy
+txs from a **single ephemeral deployer** at nonces 0..7 as legacy (pre-EIP-155, chainId-less)
+raw txs, so broadcasting the same bytes on any chain yields **byte-identical contract
+addresses** (BridgeProxy `0x54EbF70B…0750`, etc.). The `BRIDGE_DEPLOYER_KEY` env var is read
+once to sign, then is expected to be discarded by the operator — the throwaway-key model gives
+the same attacker-resistance as classic Nick-method without hand-picking an `(r, s)` pair.
+Generated artifacts live in `deployments/bridge-raw-{devnet,prod}-0.json` (the only difference
+between profiles is the `owner` baked into init code); `integration-tests/scripts/deploy-bridge-raw.sh`
+broadcasts them. Live-verified by the prod-deploy-owner integration scenario (all 8 contracts
+land at the deterministic addresses with every owner/role slot set to the prod governance EOA).
+
+**Security property (why the deployer key must be discarded):**
+> After the raw txs are produced the deployer private key must be destroyed. Otherwise an
+> attacker on a freshly-launched chain could pre-fund that sender and broadcast their *own*
+> txs from the same `(sender, nonce 0..7)` slots, claiming the deterministic addresses with
+> attacker-controlled bytecode. The throwaway-key model relies on the operator actually
+> discarding the key; if a mainnet launch wants the stronger "no key ever existed" guarantee,
+> switch to strict keyless Nick-method (hand-picked `(r, s)` + `ecrecover`-derived sender) —
+> a hardening option, not a correctness gap in the current deploy path.
+
+### Bridge: park-then-deliver gas invariant (parkRemoteMessages)
+
+Destination handling is split into a halt-safe system call plus permissionless delivery:
+
+- **Park (system call).** `parkRemoteMessages` is the 30M-gas system call run every block by
+  `SYSTEM_ADDRESS`. It loops over up to `MaxBridgeMessagesPerBlock` (= 128, a CL↔EL consensus
+  parameter) inbound messages and does nothing but write each into `pendingMessages` (~144k/msg
+  worst-case, cold slots): no token calls, no fee math, no events. Because the loop has no revert
+  path it can never halt the consensus-critical system call on a bad message — the failure mode
+  that the old per-message-cap design existed to contain (a stateful-precompile mint-over-cap is
+  an EVM *halt* that burns all forwarded gas) simply cannot occur at park time, since park touches
+  no precompiles.
+- **Deliver (user transaction).** Anyone calls `deliver(srcCID, nonce)` or
+  `deliverBatch(srcCID, nonces[])` to compute the dual destination fee (proposer + keeper legs),
+  move tokens, flip `inboundConsumed`, and emit `BridgeIn`. There is NO per-message gas cap on
+  delivery — the keeper pays and bears any halt-burn risk. A message that needs more gas than a
+  proposer would spend is still deliverable because its caller funds it directly.
+
+Invariant to preserve when tuning the budget: worst-case all-park gas (all 128 messages, all
+storage slots cold) must stay ≤ 65% × 30M ≈ 19.5M (currently 128 × ~144k ≈ 18.4M), leaving
+headroom for future struct growth and EVM repricing. This is pinned by the all-park gas test
+`test/BridgeBatchGasGuarantee.t.sol`, which also sentinels `N == 128` against the CL constant.
+`MaxBridgeMessagesPerBlock` must stay identical in the CL primitives constants (primary + both
+satellites), the reth `0g-bridge` crate, and that test.
+
 ## Testing Patterns
 
 Test base class `ZeroGravityBase.t.sol` sets up the full Symbiotic infrastructure (registries, factories, services). Tests use mock tokens and create validators/operators through the factory. `RewarderBase.t.sol` provides helpers for rewarder testing on the 0G chain side.

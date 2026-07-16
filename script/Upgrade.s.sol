@@ -12,6 +12,9 @@ import {ZeroGravityOperator} from "../src/ZeroGravityOperator.sol";
 import {Rewarder} from "../src/Rewarder.sol";
 import {RestakingStates} from "../src/RestakingStates.sol";
 import {AscendRouter} from "../src/ascend/AscendRouter.sol";
+import {Bridge} from "../src/bridge/Bridge.sol";
+import {BridgeAgency} from "../src/bridge/BridgeAgency.sol";
+import {BridgeERC20} from "../src/bridge/BridgeERC20.sol";
 
 import {JsonUtils} from "./deploy/Utils.s.sol";
 
@@ -92,6 +95,54 @@ contract UpgradeScript is Script, JsonUtils {
         ascendRouterBeacon.upgradeTo(address(impl));
 
         vm.writeJson(vm.toString(address(impl)), path, ".AscendRouterImpl");
+
+        vm.stopBroadcast();
+    }
+
+    function upgradeBridge() public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+
+        (string memory json, string memory path) = loadOrInitJson("bridge");
+
+        vm.startBroadcast(privKey);
+
+        UpgradeableBeacon bridgeBeacon = UpgradeableBeacon(vm.parseJsonAddress(json, ".bridgeBeacon"));
+        Bridge impl = new Bridge();
+        bridgeBeacon.upgradeTo(address(impl));
+
+        vm.writeJson(vm.toString(address(impl)), path, ".bridgeImpl");
+
+        vm.stopBroadcast();
+    }
+
+    function upgradeBridgeAgency() public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+
+        (string memory json, string memory path) = loadOrInitJson("bridge");
+
+        vm.startBroadcast(privKey);
+
+        UpgradeableBeacon agencyBeacon = UpgradeableBeacon(vm.parseJsonAddress(json, ".agencyBeacon"));
+        BridgeAgency impl = new BridgeAgency();
+        agencyBeacon.upgradeTo(address(impl));
+
+        vm.writeJson(vm.toString(address(impl)), path, ".agencyImpl");
+
+        vm.stopBroadcast();
+    }
+
+    function upgradeBridgeERC20() public {
+        uint256 privKey = vm.envUint("PRIVATE_KEY");
+
+        (string memory json, string memory path) = loadOrInitJson("bridge");
+
+        vm.startBroadcast(privKey);
+
+        UpgradeableBeacon erc20Beacon = UpgradeableBeacon(vm.parseJsonAddress(json, ".bridgeERC20Beacon"));
+        BridgeERC20 impl = new BridgeERC20();
+        erc20Beacon.upgradeTo(address(impl));
+
+        vm.writeJson(vm.toString(address(impl)), path, ".bridgeERC20Impl");
 
         vm.stopBroadcast();
     }

@@ -281,11 +281,18 @@ contract ZeroGravityFactory is IZeroGravityFactory, PauseControl {
      * @notice Registers an existing main-chain validator on a satellite chain.
      * @dev Permissionless — any caller can register a main-chain validator on a satellite chain.
      *      Computes the deterministic rewarder address for the satellite chain and emits an event.
-     *      No state is stored on-chain; the satellite chain node verifies the BLS signature off-chain.
-     * @param pubkey Validator's BLS public key (48 bytes)
-     * @param chainId Target satellite chain ID (must be registered)
-     * @param signature BLS signature authorizing satellite registration (96 bytes)
-     * @param _satelliteValidatorInfo Satellite-chain-specific validator metadata
+     *      No state is stored on-chain; the satellite chain node verifies the BLS signatures
+     *      off-chain. The contract treats `_satelliteValidatorInfo` as opaque bytes — the satellite
+     *      node enforces its length and layout, so adding the satellite proof-of-possession to it
+     *      requires no contract change.
+     * @param pubkey Primary chain validator's BLS public key (48 bytes); identifies the operator.
+     * @param chainId Target satellite chain ID (must be registered).
+     * @param signature Primary-key BLS signature over the registration message (96 bytes).
+     * @param _satelliteValidatorInfo 176 bytes: satellitePubkey(48) || credentials(32) ||
+     *        satellitePoP(96), where satellitePoP is the satellite key's proof-of-possession over
+     *        the same message. The satellite node rejects a registration whose satellitePoP does
+     *        not verify under satellitePubkey, preventing a primary operator from claiming a
+     *        satellite validator it does not control.
      */
     function createSatelliteValidator(
         bytes memory pubkey,
