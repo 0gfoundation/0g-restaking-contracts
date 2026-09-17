@@ -156,22 +156,41 @@ Both `ZeroGravityOperator` and `Rewarder` are deployed as **BeaconProxy** instan
 
 The roles above are self-granted to the deploying EOA by the initializers, and every
 `UpgradeableBeacon` — the upgrade key for all proxies behind it — is owned by that same EOA.
-`script/Ownership.s.sol` moves both classes of key to a multisig, per chain:
+`script/Ownership.s.sol` moves both classes of key to a multisig, per chain. Every entry point
+takes the chain id it is meant for and asserts it, because the deployment records exist for
+several 0G chains with identical key names and the two networks share contract addresses.
 
 | Step | 0G chain | Ethereum |
 |------|----------|----------|
-| 1. Upgrade keys | `transferZgBeacons(multisig)` | `transferEthBeacons(multisig)` |
-| 2. Grant admin | `grantZgAdmins(multisig)` | `grantEthAdmins(multisig)` |
-| 3. Drop deployer | `revokeZgDeployer(deployer, multisig)` | `revokeEthDeployer(deployer, multisig)` |
+| 1. Upgrade keys | `transferZgBeacons(chainId, multisig)` | `transferEthBeacons(multisig)` |
+| 2. Grant admin | `grantZgAdmins(chainId, multisig)` | `grantEthAdmins(multisig)` |
+| 3. Drop deployer | `revokeZgDeployer(chainId, multisig, committer)` | `revokeEthDeployer(multisig)` |
 
 Steps 2 and 3 are separate transactions on purpose, so the grant can be confirmed on chain
-before the deployer gives up access; step 3 refuses to run unless the multisig already holds
+before the deployer gives up access. Step 3 refuses to run unless the multisig already holds
 `DEFAULT_ADMIN_ROLE`, because revoking the last admin of an `AccessControl` contract cannot be
-undone. The operational roles are deliberately left in place: `UPDATE_ROLE` belongs to the
-committer hot key, `DISTRIBUTOR_ROLE` to the distributor bot, and `REGISTER_OPERATOR_ROLE` to
-the factory contract itself — a multisig cannot serve any of the three. `grantRoleTo` /
-`revokeRoleFrom` / `transferBeacon` cover single-target corrections, such as rotating the
-committer key or keeping a fast hot `PAUSER_ROLE` alongside the multisig.
+undone. That check on its own does not catch a mistyped multisig — the same wrong address would
+have been granted the role in step 2 and would satisfy it — so every address receiving authority
+in these steps must also have contract code. The account being revoked is derived from the
+signing key rather than passed in, and `revokeZgDeployer` additionally requires the named
+committer to already hold `UPDATE_ROLE`, which is the only on-chain evidence that dropping the
+deployer's copy does not strand submissions on a non-enumerable contract.
+
+The operational roles are deliberately left in place: `UPDATE_ROLE` belongs to the committer hot
+key, `DISTRIBUTOR_ROLE` to the distributor bot, and `REGISTER_OPERATOR_ROLE` to the factory
+contract itself — a multisig cannot serve any of the three. `grantRoleTo` / `revokeRoleFrom` /
+`transferBeacon` cover single-target corrections, such as rotating the committer key or keeping a
+fast hot `PAUSER_ROLE` alongside the multisig, and accept an EOA for exactly that reason.
+
+**Not covered: the VetoSlasher resolver.** `createValidator` sets each new vault's veto resolver
+to the address in `InitParams.resolver`, which the deployment scripts set to the deploying EOA.
+That resolver can veto any slash within the veto window. `VetoSlasher.setResolver` only accepts
+calls from the registered network — the factory — and no factory selector calls it, so existing
+vaults keep their current resolver no matter what the handover does; `setParams` only changes the
+resolver handed to vaults created later, and a resolver change takes `resolverSetEpochsDelay`
+vault epochs to take effect. Moving it therefore requires a factory upgrade that exposes a
+resolver setter. Until then the veto path stays with the deploying EOA, and the handover should
+not be described as complete.
 
 ## Reward Distribution Model
 

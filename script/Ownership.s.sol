@@ -10,22 +10,35 @@ import {JsonUtils} from "./deploy/Utils.s.sol";
 
 /**
  * @title Governance handover
- * @notice Moves every privileged key of a deployed restaking stack off the deploying EOA and
- *         onto a multisig: the `UpgradeableBeacon` owners (which are the upgrade keys for all
- *         proxies behind them) and every `AccessControl` role held by the deployer.
- * @dev Handover is deliberately split into `grant*` then `revoke*` so the two land in separate
+ * @notice Moves the privileged keys of a deployed restaking stack off the deploying EOA and onto
+ *         a multisig: the `UpgradeableBeacon` owners (the upgrade keys for all proxies behind
+ *         them) and the `AccessControl` roles the initializers self-granted.
+ * @dev NOT covered, and not fixable from here: each Symbiotic VetoSlasher created by
+ *      `createValidator` had its resolver set to the deploying EOA, and that resolver can veto
+ *      any slash. `VetoSlasher.setResolver` only accepts calls from the registered network -
+ *      the factory - and no factory selector calls it, so existing vaults keep that resolver
+ *      until the factory is upgraded to expose one. `ZeroGravityFactory.setParams` only changes
+ *      the resolver handed to vaults created later. Treat the veto path as still EOA-controlled
+ *      after running everything here.
+ *
+ *      Handover is deliberately split into `grant*` then `revoke*` so the two land in separate
  *      transactions and the grant can be verified on chain before the deployer gives up access.
  *      `revoke*` refuses to run unless the incoming admin already holds `DEFAULT_ADMIN_ROLE`,
- *      because revoking the last admin of an `AccessControl` contract is unrecoverable.
+ *      because revoking the last admin of an `AccessControl` contract is unrecoverable. That
+ *      guard alone does not catch a mistyped multisig - the same wrong address would have been
+ *      granted the role one step earlier and would satisfy it - so every address that receives
+ *      authority in the batch steps must also have contract code, which a multisig always does.
  *
- *      Addresses come from the chain-scoped deployment records, so every entry point asserts the
- *      chain it is being run against. This matters here: the 0G-chain and Ethereum deployments
- *      share addresses (same deployer, same nonces), e.g. 0xd5AB...34b6 is RestakingStates on 0G
- *      and ZeroGravityFactory on Ethereum, so a script pointed at the wrong RPC would otherwise
- *      hand out roles on a contract it never inspected.
+ *      Addresses come from the chain-scoped deployment records, and every entry point takes the
+ *      chain id it is meant for and asserts it. Checking for "not Ethereum" is not enough: the
+ *      records exist for several 0G chains (16602 among them) with identical key names, so a
+ *      handover aimed at mainnet would otherwise run to completion against a testnet RPC. The
+ *      two chains also share contract addresses (same deployer, same nonces) - 0xd5AB...34b6 is
+ *      RestakingStates on 0G and ZeroGravityFactory on Ethereum.
  *
  *      Signing key: PRIVATE_KEY on Ethereum mainnet, PRIVATE_KEY_0G everywhere else, matching the
- *      convention of the deployment scripts in this directory.
+ *      convention of the deployment scripts in this directory. The revoked deployer is derived
+ *      from that key rather than passed in, so it cannot name the wrong account.
  */
 contract OwnershipScript is Script, JsonUtils {
     bytes32 internal constant DEFAULT_ADMIN_ROLE = 0x00;
@@ -37,11 +50,13 @@ contract OwnershipScript is Script, JsonUtils {
 
     uint256 internal constant ETHEREUM_CHAIN_ID = 1;
 
-    error NotEthereum(uint256 chainId);
+    error WrongChain(uint256 actual, uint256 expected);
     error EthereumNotAllowed();
     error ZeroAddress();
+    error NotAContract(address account);
     error AdminNotHandedOver(address target, address newAdmin);
     error SameAccount(address account);
+    error CommitterRoleMissing(address target, address expectedCommitter);
 
     // ---------------------------------------------------------------------------------------
     // 0G chain: address book
@@ -82,10 +97,8 @@ contract OwnershipScript is Script, JsonUtils {
     // ---------------------------------------------------------------------------------------
 
     /// @notice Step 1 (0G): move the four beacon owners to `newOwner`.
-    function transferZgBeacons(
-        address newOwner
-    ) public {
-        _requireNotEthereum();
+    function transferZgBeacons(uint256 expectedChainId, address newOwner) public {
+        _requireZgChain(expectedChainId);
         address[] memory beacons = zgBeacons();
 
         vm.startBroadcast(_signingKey());
@@ -96,10 +109,9 @@ contract OwnershipScript is Script, JsonUtils {
     /// @notice Step 2 (0G): grant `DEFAULT_ADMIN_ROLE` on every role-gated contract to `newAdmin`.
     /// @dev Only the admin role is granted. `UPDATE_ROLE` stays with the committer hot key and
     ///      `DISTRIBUTOR_ROLE` with the distributor bot; a multisig cannot serve those.
-    function grantZgAdmins(
-        address newAdmin
-    ) public {
-        _requireNotEthereum();
+    function grantZgAdmins(uint256 expectedChainId, address newAdmin) public {
+        _requireZgChain(expectedChainId);
+        _requireContract(newAdmin);
         address[] memory targets = zgAccessControlled();
 
         vm.startBroadcast(_signingKey());
@@ -109,13 +121,27 @@ contract OwnershipScript is Script, JsonUtils {
         vm.stopBroadcast();
     }
 
-    /// @notice Step 3 (0G): strip every role `deployer` still holds, after `newAdmin` took over.
+    /// @notice Step 3 (0G): strip every role the deployer still holds, after `newAdmin` took over.
     /// @dev Also drops the `UPDATE_ROLE` the deployer self-granted in `RestakingStates.initialize`
     ///      and never used for submissions; leaving it behind keeps a spare write key alive.
-    function revokeZgDeployer(address deployer, address newAdmin) public {
-        _requireNotEthereum();
+    ///      `expectedCommitter` must be the live submission key and must already hold
+    ///      `UPDATE_ROLE`: `RestakingStates` is not enumerable, so this is the only way to
+    ///      confirm on chain that dropping the deployer's copy does not leave submissions
+    ///      without a key.
+    function revokeZgDeployer(uint256 expectedChainId, address newAdmin, address expectedCommitter) public {
+        _requireZgChain(expectedChainId);
+        _requireContract(newAdmin);
+
+        address deployer = _deployer();
         address[] memory targets = zgAccessControlled();
         address restakingStates = zgRestakingStates();
+
+        if (expectedCommitter == deployer || expectedCommitter == address(0)) {
+            revert SameAccount(expectedCommitter);
+        }
+        if (!IAccessControl(restakingStates).hasRole(UPDATE_ROLE, expectedCommitter)) {
+            revert CommitterRoleMissing(restakingStates, expectedCommitter);
+        }
 
         vm.startBroadcast(_signingKey());
         // RestakingStates: non-admin role first, so an abort cannot leave the deployer with a
@@ -157,7 +183,7 @@ contract OwnershipScript is Script, JsonUtils {
     function transferEthBeacons(
         address newOwner
     ) public {
-        _requireEthereum();
+        _requireChain(ETHEREUM_CHAIN_ID);
         address[] memory beacons = ethBeacons();
 
         vm.startBroadcast(_signingKey());
@@ -171,7 +197,8 @@ contract OwnershipScript is Script, JsonUtils {
     function grantEthAdmins(
         address newAdmin
     ) public {
-        _requireEthereum();
+        _requireChain(ETHEREUM_CHAIN_ID);
+        _requireContract(newAdmin);
         (address factory, address middleware) = ethAccessControlled();
 
         vm.startBroadcast(_signingKey());
@@ -184,11 +211,16 @@ contract OwnershipScript is Script, JsonUtils {
         vm.stopBroadcast();
     }
 
-    /// @notice Step 3 (Ethereum): strip every role `deployer` still holds.
+    /// @notice Step 3 (Ethereum): strip every role the deployer still holds.
     /// @dev Revokes `PAUSER_ROLE` too. To keep a fast-reacting hot pauser alongside the multisig,
     ///      grant it to that key first (`grantRoleTo`) and confirm before running this.
-    function revokeEthDeployer(address deployer, address newAdmin) public {
-        _requireEthereum();
+    function revokeEthDeployer(
+        address newAdmin
+    ) public {
+        _requireChain(ETHEREUM_CHAIN_ID);
+        _requireContract(newAdmin);
+
+        address deployer = _deployer();
         (address factory, address middleware) = ethAccessControlled();
 
         vm.startBroadcast(_signingKey());
@@ -206,7 +238,8 @@ contract OwnershipScript is Script, JsonUtils {
     // ---------------------------------------------------------------------------------------
 
     /// @notice Transfer one beacon owner, for a partial or corrective run.
-    function transferBeacon(address beacon, address newOwner) public {
+    function transferBeacon(uint256 expectedChainId, address beacon, address newOwner) public {
+        _requireChain(expectedChainId);
         address[] memory beacons = new address[](1);
         beacons[0] = beacon;
 
@@ -216,7 +249,11 @@ contract OwnershipScript is Script, JsonUtils {
     }
 
     /// @notice Grant one role on one contract, e.g. handing `UPDATE_ROLE` to a new committer key.
-    function grantRoleTo(address target, bytes32 role, address account) public {
+    /// @dev Unlike the batch steps this accepts an account without contract code, because the
+    ///      operational roles belong to hot keys.
+    function grantRoleTo(uint256 expectedChainId, address target, bytes32 role, address account) public {
+        _requireChain(expectedChainId);
+
         vm.startBroadcast(_signingKey());
         _grantRole(target, role, account);
         vm.stopBroadcast();
@@ -224,7 +261,15 @@ contract OwnershipScript is Script, JsonUtils {
 
     /// @notice Revoke one role on one contract. `newAdmin` is the address that must already hold
     ///         `DEFAULT_ADMIN_ROLE`, so that no revocation can leave the contract admin-less.
-    function revokeRoleFrom(address target, bytes32 role, address account, address newAdmin) public {
+    function revokeRoleFrom(
+        uint256 expectedChainId,
+        address target,
+        bytes32 role,
+        address account,
+        address newAdmin
+    ) public {
+        _requireChain(expectedChainId);
+
         vm.startBroadcast(_signingKey());
         _revokeRole(target, role, account, newAdmin);
         vm.stopBroadcast();
@@ -237,9 +282,9 @@ contract OwnershipScript is Script, JsonUtils {
     /// @dev Skips a beacon already owned by `newOwner` so an interrupted run can be repeated.
     ///      A beacon owned by a third party is left to revert inside `transferOwnership`.
     function _transferBeacons(address[] memory beacons, address newOwner) internal {
-        if (newOwner == address(0)) {
-            revert ZeroAddress();
-        }
+        // An upgrade key is only ever meant to reach a multisig, and the transfer has no
+        // acceptance step to undo a typo, so a destination without code is rejected outright.
+        _requireContract(newOwner);
         for (uint256 i = 0; i < beacons.length; ++i) {
             address current = UpgradeableBeacon(beacons[i]).owner();
             if (current == newOwner) {
@@ -292,15 +337,38 @@ contract OwnershipScript is Script, JsonUtils {
         return block.chainid == ETHEREUM_CHAIN_ID ? vm.envUint("PRIVATE_KEY") : vm.envUint("PRIVATE_KEY_0G");
     }
 
-    function _requireEthereum() internal view {
-        if (block.chainid != ETHEREUM_CHAIN_ID) {
-            revert NotEthereum(block.chainid);
+    /// @dev The account losing its roles is whoever signs, by definition of this handover.
+    function _deployer() internal view returns (address) {
+        return vm.addr(_signingKey());
+    }
+
+    function _requireContract(
+        address account
+    ) internal view {
+        if (account == address(0)) {
+            revert ZeroAddress();
+        }
+        if (account.code.length == 0) {
+            revert NotAContract(account);
         }
     }
 
-    function _requireNotEthereum() internal view {
-        if (block.chainid == ETHEREUM_CHAIN_ID) {
+    function _requireChain(
+        uint256 expected
+    ) internal view {
+        if (block.chainid != expected) {
+            revert WrongChain(block.chainid, expected);
+        }
+    }
+
+    /// @dev Guards the 0G address book against being used on Ethereum, where the same addresses
+    ///      belong to different contracts, on top of the exact chain-id check.
+    function _requireZgChain(
+        uint256 expected
+    ) internal view {
+        if (expected == ETHEREUM_CHAIN_ID) {
             revert EthereumNotAllowed();
         }
+        _requireChain(expected);
     }
 }

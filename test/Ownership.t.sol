@@ -18,6 +18,10 @@ import {OwnershipScript} from "../script/Ownership.s.sol";
 import {Token} from "./mocks/Token.sol";
 import {ZeroGravityBaseTest} from "./ZeroGravityBase.t.sol";
 
+/// @dev Stands in for a multisig: the handover steps require a destination with contract code, so
+///      an EOA cannot be used here.
+contract MultisigStub {}
+
 /// @dev Shared by both halves: deployment records live in one directory so the two test contracts
 ///      can set the same DEPLOYMENT_PATH value even when forge runs them on separate threads, and
 ///      the chain-scoped file names keep their contents apart.
@@ -60,6 +64,8 @@ contract OwnershipZgTest is Test, OwnershipTestBase {
     uint256 internal deployerKey;
     address internal safe;
     address internal committer;
+    address internal distributor;
+    address internal otherAdmin;
 
     RestakingStates internal restakingStates;
     RewarderFactory internal rewarderFactory;
@@ -73,8 +79,10 @@ contract OwnershipZgTest is Test, OwnershipTestBase {
         vm.chainId(ZG_CHAIN_ID);
 
         (deployer, deployerKey) = makeAddrAndKey("zgDeployer");
-        safe = makeAddr("multisig");
+        safe = address(new MultisigStub());
         committer = makeAddr("committer");
+        distributor = makeAddr("distributor");
+        otherAdmin = makeAddr("otherAdmin");
         // Label-derived throwaway key, not a secret: the script reads its signer from the
         // environment, so exercising the real entry points means populating that variable.
         vm.setEnv("PRIVATE_KEY_0G", vm.toString(deployerKey));
@@ -123,8 +131,11 @@ contract OwnershipZgTest is Test, OwnershipTestBase {
             )
         );
 
-        // The committer hot key that must survive the handover untouched.
+        // The operational keys that must survive the handover untouched, plus an unrelated admin
+        // that proves the revoke step only ever targets the signing key.
         restakingStates.grantRole(UPDATE_ROLE, committer);
+        ascendRouter.grantRole(ascendRouter.DISTRIBUTOR_ROLE(), distributor);
+        restakingStates.grantRole(DEFAULT_ADMIN_ROLE, otherAdmin);
 
         vm.stopPrank();
 
@@ -182,10 +193,19 @@ contract OwnershipZgTest is Test, OwnershipTestBase {
         assertEq(_beaconOf(address(ascendRouter)), address(routerBeacon));
     }
 
+    /// @dev The role identifiers are hard-coded in the script. Without this, a typo in one of them
+    ///      would make the revoke step silently skip the role it was meant to drop, while the
+    ///      tests kept passing because they would use the same wrong constant on both sides.
+    function test_roleConstantsMatchTheDeployedContracts() public view {
+        assertEq(UPDATE_ROLE, restakingStates.UPDATE_ROLE());
+        assertEq(DEFAULT_ADMIN_ROLE, restakingStates.DEFAULT_ADMIN_ROLE());
+        assertEq(ascendRouter.DISTRIBUTOR_ROLE(), keccak256("DISTRIBUTOR_ROLE"));
+    }
+
     // ---- beacon ownership ------------------------------------------------------------------
 
     function test_transferZgBeacons_movesEveryUpgradeKey() public {
-        transferZgBeacons(safe);
+        transferZgBeacons(ZG_CHAIN_ID, safe);
 
         assertEq(statesBeacon.owner(), safe);
         assertEq(factoryBeacon.owner(), safe);
@@ -198,7 +218,7 @@ contract OwnershipZgTest is Test, OwnershipTestBase {
         statesBeacon.transferOwnership(safe);
 
         // A re-run must skip the beacon that already moved instead of reverting on it.
-        transferZgBeacons(safe);
+        transferZgBeacons(ZG_CHAIN_ID, safe);
 
         assertEq(statesBeacon.owner(), safe);
         assertEq(routerBeacon.owner(), safe);
@@ -206,26 +226,48 @@ contract OwnershipZgTest is Test, OwnershipTestBase {
 
     function test_transferZgBeacons_rejectsZeroOwner() public {
         vm.expectRevert(ZeroAddress.selector);
-        this.transferZgBeacons(address(0));
+        this.transferZgBeacons(ZG_CHAIN_ID, address(0));
     }
 
-    function test_transferZgBeacons_rejectsEthereum() public {
+    /// @dev The guard that catches a mistyped multisig: a non-zero address with no code passes
+    ///      every other check, and an upgrade key sent there is gone for good.
+    function test_transferZgBeacons_rejectsAnOwnerWithNoCode() public {
+        address typo = makeAddr("typoNotAContract");
+        assertEq(typo.code.length, 0);
+
+        vm.expectRevert(abi.encodeWithSelector(NotAContract.selector, typo));
+        this.transferZgBeacons(ZG_CHAIN_ID, typo);
+
+        assertEq(statesBeacon.owner(), deployer);
+    }
+
+    function test_transferZgBeacons_rejectsAChainIdMismatch() public {
+        vm.expectRevert(abi.encodeWithSelector(WrongChain.selector, ZG_CHAIN_ID, 16_602));
+        this.transferZgBeacons(16_602, safe);
+    }
+
+    function test_transferZgBeacons_rejectsEthereumAsTheExpectedChain() public {
         vm.chainId(1);
         vm.expectRevert(EthereumNotAllowed.selector);
-        this.transferZgBeacons(safe);
+        this.transferZgBeacons(1, safe);
     }
 
     function test_transferBeacon_movesASingleBeacon() public {
-        transferBeacon(address(routerBeacon), safe);
+        transferBeacon(ZG_CHAIN_ID, address(routerBeacon), safe);
 
         assertEq(routerBeacon.owner(), safe);
         assertEq(statesBeacon.owner(), deployer);
     }
 
+    function test_transferBeacon_rejectsAChainIdMismatch() public {
+        vm.expectRevert(abi.encodeWithSelector(WrongChain.selector, ZG_CHAIN_ID, 1));
+        this.transferBeacon(1, address(routerBeacon), safe);
+    }
+
     // ---- roles -----------------------------------------------------------------------------
 
     function test_grantZgAdmins_grantsAdminEverywhereAndNothingElse() public {
-        grantZgAdmins(safe);
+        grantZgAdmins(ZG_CHAIN_ID, safe);
 
         assertTrue(restakingStates.hasRole(DEFAULT_ADMIN_ROLE, safe));
         assertTrue(rewarderFactory.hasRole(DEFAULT_ADMIN_ROLE, safe));
@@ -239,48 +281,85 @@ contract OwnershipZgTest is Test, OwnershipTestBase {
     }
 
     function test_grantZgAdmins_isIdempotent() public {
-        grantZgAdmins(safe);
-        grantZgAdmins(safe);
+        grantZgAdmins(ZG_CHAIN_ID, safe);
+        grantZgAdmins(ZG_CHAIN_ID, safe);
 
         assertTrue(restakingStates.hasRole(DEFAULT_ADMIN_ROLE, safe));
     }
 
+    function test_grantZgAdmins_rejectsAnAdminWithNoCode() public {
+        address typo = makeAddr("typoNotAContract");
+
+        vm.expectRevert(abi.encodeWithSelector(NotAContract.selector, typo));
+        this.grantZgAdmins(ZG_CHAIN_ID, typo);
+
+        assertFalse(restakingStates.hasRole(DEFAULT_ADMIN_ROLE, typo));
+    }
+
     function test_revokeZgDeployer_stripsAdminAndTheStaleUpdateRole() public {
-        grantZgAdmins(safe);
-        revokeZgDeployer(deployer, safe);
+        assertTrue(restakingStates.hasRole(UPDATE_ROLE, deployer));
+
+        grantZgAdmins(ZG_CHAIN_ID, safe);
+        revokeZgDeployer(ZG_CHAIN_ID, safe, committer);
 
         assertFalse(restakingStates.hasRole(DEFAULT_ADMIN_ROLE, deployer));
         assertFalse(rewarderFactory.hasRole(DEFAULT_ADMIN_ROLE, deployer));
         assertFalse(ascendRouter.hasRole(DEFAULT_ADMIN_ROLE, deployer));
         assertFalse(restakingStates.hasRole(UPDATE_ROLE, deployer));
 
-        // The multisig is the sole admin, and the committer is untouched.
+        // The multisig has the admin, and both operational keys are untouched.
         assertTrue(restakingStates.hasRole(DEFAULT_ADMIN_ROLE, safe));
         assertTrue(restakingStates.hasRole(UPDATE_ROLE, committer));
+        assertTrue(ascendRouter.hasRole(ascendRouter.DISTRIBUTOR_ROLE(), distributor));
+    }
+
+    /// @dev The revoked account is derived from the signing key, never passed in, so the step
+    ///      cannot be pointed at the wrong holder - including another admin.
+    function test_revokeZgDeployer_onlyTouchesTheSigningKey() public {
+        grantZgAdmins(ZG_CHAIN_ID, safe);
+        revokeZgDeployer(ZG_CHAIN_ID, safe, committer);
+
+        assertTrue(restakingStates.hasRole(DEFAULT_ADMIN_ROLE, otherAdmin));
+        assertFalse(restakingStates.hasRole(DEFAULT_ADMIN_ROLE, deployer));
     }
 
     /// @dev Guards the one unrecoverable mistake in the whole handover: revoking the deployer's
     ///      admin role before the multisig has one leaves the contract with no admin at all.
     function test_revokeZgDeployer_revertsWhenMultisigIsNotAdminYet() public {
         vm.expectRevert(abi.encodeWithSelector(AdminNotHandedOver.selector, address(restakingStates), safe));
-        this.revokeZgDeployer(deployer, safe);
+        this.revokeZgDeployer(ZG_CHAIN_ID, safe, committer);
 
         assertTrue(restakingStates.hasRole(DEFAULT_ADMIN_ROLE, deployer));
         assertTrue(restakingStates.hasRole(UPDATE_ROLE, deployer));
     }
 
-    function test_revokeZgDeployer_revertsWhenDeployerIsTheNewAdmin() public {
-        grantZgAdmins(deployer);
+    /// @dev `RestakingStates` is not enumerable, so naming the live committer is the only on-chain
+    ///      proof that dropping the deployer's `UPDATE_ROLE` does not strand submissions.
+    function test_revokeZgDeployer_revertsWhenTheNamedCommitterHasNoUpdateRole() public {
+        address notTheCommitter = makeAddr("notTheCommitter");
+        grantZgAdmins(ZG_CHAIN_ID, safe);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(CommitterRoleMissing.selector, address(restakingStates), notTheCommitter)
+        );
+        this.revokeZgDeployer(ZG_CHAIN_ID, safe, notTheCommitter);
+
+        assertTrue(restakingStates.hasRole(UPDATE_ROLE, deployer));
+        assertTrue(restakingStates.hasRole(DEFAULT_ADMIN_ROLE, deployer));
+    }
+
+    function test_revokeZgDeployer_revertsWhenTheCommitterIsTheDeployer() public {
+        grantZgAdmins(ZG_CHAIN_ID, safe);
 
         vm.expectRevert(abi.encodeWithSelector(SameAccount.selector, deployer));
-        this.revokeZgDeployer(deployer, deployer);
+        this.revokeZgDeployer(ZG_CHAIN_ID, safe, deployer);
     }
 
     function test_revokeZgDeployer_isIdempotent() public {
-        grantZgAdmins(safe);
-        revokeZgDeployer(deployer, safe);
+        grantZgAdmins(ZG_CHAIN_ID, safe);
+        revokeZgDeployer(ZG_CHAIN_ID, safe, committer);
         // Re-running must not revert on roles that are already gone.
-        revokeZgDeployer(deployer, safe);
+        revokeZgDeployer(ZG_CHAIN_ID, safe, committer);
 
         assertFalse(restakingStates.hasRole(DEFAULT_ADMIN_ROLE, deployer));
     }
@@ -288,16 +367,28 @@ contract OwnershipZgTest is Test, OwnershipTestBase {
     function test_grantRoleTo_andRevokeRoleFrom_rotateTheCommitterKey() public {
         address newCommitter = makeAddr("newCommitter");
 
-        grantRoleTo(address(restakingStates), UPDATE_ROLE, newCommitter);
+        // Deliberately an EOA: the operational roles belong to hot keys, so the single-target
+        // entry points must not demand contract code the way the batch steps do.
+        grantRoleTo(ZG_CHAIN_ID, address(restakingStates), UPDATE_ROLE, newCommitter);
         assertTrue(restakingStates.hasRole(UPDATE_ROLE, newCommitter));
 
-        revokeRoleFrom(address(restakingStates), UPDATE_ROLE, committer, deployer);
+        revokeRoleFrom(ZG_CHAIN_ID, address(restakingStates), UPDATE_ROLE, committer, deployer);
         assertFalse(restakingStates.hasRole(UPDATE_ROLE, committer));
     }
 
     function test_grantRoleTo_rejectsZeroAccount() public {
         vm.expectRevert(ZeroAddress.selector);
-        this.grantRoleTo(address(restakingStates), UPDATE_ROLE, address(0));
+        this.grantRoleTo(ZG_CHAIN_ID, address(restakingStates), UPDATE_ROLE, address(0));
+    }
+
+    function test_grantRoleTo_rejectsAChainIdMismatch() public {
+        vm.expectRevert(abi.encodeWithSelector(WrongChain.selector, ZG_CHAIN_ID, 1));
+        this.grantRoleTo(1, address(restakingStates), UPDATE_ROLE, committer);
+    }
+
+    function test_revokeRoleFrom_rejectsAChainIdMismatch() public {
+        vm.expectRevert(abi.encodeWithSelector(WrongChain.selector, ZG_CHAIN_ID, 1));
+        this.revokeRoleFrom(1, address(restakingStates), UPDATE_ROLE, committer, deployer);
     }
 }
 
@@ -322,14 +413,15 @@ contract OwnershipEthTest is ZeroGravityBaseTest, OwnershipTestBase {
         vm.chainId(1);
 
         (deployer, deployerKey) = makeAddrAndKey("ethDeployer");
-        safe = makeAddr("multisig");
+        safe = address(new MultisigStub());
         vm.setEnv("PRIVATE_KEY", vm.toString(deployerKey));
 
         factoryBeacon = UpgradeableBeacon(_beaconOf(address(network)));
         middlewareBeacon = UpgradeableBeacon(_beaconOf(address(middleware)));
 
         // The fixture deploys as address(this); mirror mainnet by putting every privileged key on
-        // the deployer EOA the script signs with.
+        // the deployer EOA the script signs with. address(this) keeps its own admin role, which
+        // the handover must leave alone.
         factoryBeacon.transferOwnership(deployer);
         middlewareBeacon.transferOwnership(deployer);
         operatorBeacon.transferOwnership(deployer);
@@ -394,8 +486,17 @@ contract OwnershipEthTest is ZeroGravityBaseTest, OwnershipTestBase {
 
     function test_transferEthBeacons_rejectsNonEthereumChain() public {
         vm.chainId(16_661);
-        vm.expectRevert(abi.encodeWithSelector(NotEthereum.selector, 16_661));
+        vm.expectRevert(abi.encodeWithSelector(WrongChain.selector, 16_661, 1));
         this.transferEthBeacons(safe);
+    }
+
+    function test_transferEthBeacons_rejectsAnOwnerWithNoCode() public {
+        address typo = makeAddr("typoNotAContract");
+
+        vm.expectRevert(abi.encodeWithSelector(NotAContract.selector, typo));
+        this.transferEthBeacons(typo);
+
+        assertEq(factoryBeacon.owner(), deployer);
     }
 
     function test_grantEthAdmins_grantsAllSixRoles() public {
@@ -411,7 +512,7 @@ contract OwnershipEthTest is ZeroGravityBaseTest, OwnershipTestBase {
 
     function test_revokeEthDeployer_stripsEveryDeployerRole() public {
         grantEthAdmins(safe);
-        revokeEthDeployer(deployer, safe);
+        revokeEthDeployer(safe);
 
         assertFalse(network.hasRole(DEFAULT_ADMIN_ROLE, deployer));
         assertFalse(network.hasRole(UPDATE_COLLATERAL_ROLE, deployer));
@@ -424,6 +525,16 @@ contract OwnershipEthTest is ZeroGravityBaseTest, OwnershipTestBase {
         assertTrue(middleware.hasRole(SLASHER_ROLE, safe));
     }
 
+    /// @dev The revoked account comes from the signing key, so an unrelated admin - here the
+    ///      fixture itself - keeps its roles.
+    function test_revokeEthDeployer_onlyTouchesTheSigningKey() public {
+        grantEthAdmins(safe);
+        revokeEthDeployer(safe);
+
+        assertTrue(network.hasRole(DEFAULT_ADMIN_ROLE, address(this)));
+        assertFalse(network.hasRole(DEFAULT_ADMIN_ROLE, deployer));
+    }
+
     /// @dev The factory holds this role on the middleware so it can register operators; a handover
     ///      that touched it would break validator registration.
     function test_handoverLeavesTheFactorysRegisterOperatorRoleAlone() public {
@@ -431,7 +542,7 @@ contract OwnershipEthTest is ZeroGravityBaseTest, OwnershipTestBase {
         assertTrue(middleware.hasRole(registerOperatorRole, address(network)));
 
         grantEthAdmins(safe);
-        revokeEthDeployer(deployer, safe);
+        revokeEthDeployer(safe);
 
         assertTrue(middleware.hasRole(registerOperatorRole, address(network)));
         assertFalse(middleware.hasRole(registerOperatorRole, safe));
@@ -439,7 +550,7 @@ contract OwnershipEthTest is ZeroGravityBaseTest, OwnershipTestBase {
 
     function test_revokeEthDeployer_revertsWhenMultisigIsNotAdminYet() public {
         vm.expectRevert(abi.encodeWithSelector(AdminNotHandedOver.selector, address(network), safe));
-        this.revokeEthDeployer(deployer, safe);
+        this.revokeEthDeployer(safe);
 
         assertTrue(network.hasRole(PAUSER_ROLE, deployer));
     }
@@ -448,7 +559,7 @@ contract OwnershipEthTest is ZeroGravityBaseTest, OwnershipTestBase {
     ///      one privileged action that has to work under time pressure.
     function test_multisigCanExerciseTheRolesAfterHandover() public {
         grantEthAdmins(safe);
-        revokeEthDeployer(deployer, safe);
+        revokeEthDeployer(safe);
 
         vm.prank(safe);
         network.pause();
@@ -469,7 +580,7 @@ contract OwnershipEthTest is ZeroGravityBaseTest, OwnershipTestBase {
     ///      the deployer cannot upgrade anything.
     function test_multisigOwnsTheUpgradeKeyAfterHandover() public {
         transferEthBeacons(safe);
-        address newImpl = address(new ZeroGravityOperatorStub());
+        address newImpl = address(new MultisigStub());
 
         vm.prank(deployer);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, deployer));
@@ -480,6 +591,3 @@ contract OwnershipEthTest is ZeroGravityBaseTest, OwnershipTestBase {
         assertEq(operatorBeacon.implementation(), newImpl);
     }
 }
-
-/// @dev Any contract with code is a valid beacon implementation for the upgrade-key assertion.
-contract ZeroGravityOperatorStub {}
