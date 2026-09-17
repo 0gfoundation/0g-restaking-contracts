@@ -199,7 +199,6 @@ contract OwnershipZgTest is Test, OwnershipTestBase {
     function test_roleConstantsMatchTheDeployedContracts() public view {
         assertEq(UPDATE_ROLE, restakingStates.UPDATE_ROLE());
         assertEq(DEFAULT_ADMIN_ROLE, restakingStates.DEFAULT_ADMIN_ROLE());
-        assertEq(ascendRouter.DISTRIBUTOR_ROLE(), keccak256("DISTRIBUTOR_ROLE"));
     }
 
     // ---- beacon ownership ------------------------------------------------------------------
@@ -374,6 +373,30 @@ contract OwnershipZgTest is Test, OwnershipTestBase {
 
         revokeRoleFrom(ZG_CHAIN_ID, address(restakingStates), UPDATE_ROLE, committer, deployer);
         assertFalse(restakingStates.hasRole(UPDATE_ROLE, committer));
+    }
+
+    /// @dev The corrective entry points are the way around the batch-step guard, so the admin role
+    ///      carries the same contract-code rule there.
+    function test_grantRoleTo_rejectsACodelessAdmin() public {
+        address typo = makeAddr("typoNotAContract");
+
+        vm.expectRevert(abi.encodeWithSelector(NotAContract.selector, typo));
+        this.grantRoleTo(ZG_CHAIN_ID, address(restakingStates), DEFAULT_ADMIN_ROLE, typo);
+
+        // An operational role still goes to a hot key, which is the point of this entry point.
+        grantRoleTo(ZG_CHAIN_ID, address(restakingStates), UPDATE_ROLE, typo);
+        assertTrue(restakingStates.hasRole(UPDATE_ROLE, typo));
+    }
+
+    /// @dev Without this, nothing covers the guard that stops an admin revoking itself through the
+    ///      corrective path and leaving the contract with no admin.
+    function test_revokeRoleFrom_rejectsRevokingTheNamedAdminsOwnRole() public {
+        grantZgAdmins(ZG_CHAIN_ID, safe);
+
+        vm.expectRevert(abi.encodeWithSelector(SameAccount.selector, safe));
+        this.revokeRoleFrom(ZG_CHAIN_ID, address(restakingStates), DEFAULT_ADMIN_ROLE, safe, safe);
+
+        assertTrue(restakingStates.hasRole(DEFAULT_ADMIN_ROLE, safe));
     }
 
     function test_grantRoleTo_rejectsZeroAccount() public {

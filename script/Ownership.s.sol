@@ -124,15 +124,16 @@ contract OwnershipScript is Script, JsonUtils {
     /// @notice Step 3 (0G): strip every role the deployer still holds, after `newAdmin` took over.
     /// @dev Also drops the `UPDATE_ROLE` the deployer self-granted in `RestakingStates.initialize`
     ///      and never used for submissions; leaving it behind keeps a spare write key alive.
-    ///      `expectedCommitter` must be the live submission key and must already hold
-    ///      `UPDATE_ROLE`: `RestakingStates` is not enumerable, so this is the only way to
-    ///      confirm on chain that dropping the deployer's copy does not leave submissions
-    ///      without a key.
+    ///      `expectedCommitter` must already hold `UPDATE_ROLE`, so that dropping the deployer's
+    ///      copy cannot leave the role with no holder at all. It forces the operator to name the
+    ///      key they believe is submitting; it does not prove that key is actually in use, which
+    ///      only the sender of recent `RestakingStates` updates shows.
     function revokeZgDeployer(uint256 expectedChainId, address newAdmin, address expectedCommitter) public {
         _requireZgChain(expectedChainId);
         _requireContract(newAdmin);
 
         address deployer = _deployer();
+        console2.log("revoking from deployer:", deployer);
         address[] memory targets = zgAccessControlled();
         address restakingStates = zgRestakingStates();
 
@@ -221,6 +222,7 @@ contract OwnershipScript is Script, JsonUtils {
         _requireContract(newAdmin);
 
         address deployer = _deployer();
+        console2.log("revoking from deployer:", deployer);
         (address factory, address middleware) = ethAccessControlled();
 
         vm.startBroadcast(_signingKey());
@@ -249,10 +251,14 @@ contract OwnershipScript is Script, JsonUtils {
     }
 
     /// @notice Grant one role on one contract, e.g. handing `UPDATE_ROLE` to a new committer key.
-    /// @dev Unlike the batch steps this accepts an account without contract code, because the
-    ///      operational roles belong to hot keys.
+    /// @dev Accepts an account without contract code, because the operational roles belong to hot
+    ///      keys - except for `DEFAULT_ADMIN_ROLE`, where the batch steps' rule applies: granting
+    ///      it here and then revoking the deployer would otherwise route around that guard.
     function grantRoleTo(uint256 expectedChainId, address target, bytes32 role, address account) public {
         _requireChain(expectedChainId);
+        if (role == DEFAULT_ADMIN_ROLE) {
+            _requireContract(account);
+        }
 
         vm.startBroadcast(_signingKey());
         _grantRole(target, role, account);
