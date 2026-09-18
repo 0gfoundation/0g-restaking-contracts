@@ -152,6 +152,60 @@ Both `ZeroGravityOperator` and `Rewarder` are deployed as **BeaconProxy** instan
 |------|-----------|--------|
 | `DEFAULT_ADMIN_ROLE` | Factory | `optIn` |
 
+### Governance Handover
+
+The roles above are self-granted to the deploying EOA by the initializers, and every
+`UpgradeableBeacon` — the upgrade key for all proxies behind it — is owned by that same EOA.
+`script/Ownership.s.sol` moves both classes of key to a multisig, per chain. Every entry point
+asserts the chain it runs on. The 0G ones take the chain id as their first argument, because the
+deployment records exist for several 0G chains with identical key names and a handover aimed at
+mainnet would otherwise run against a testnet RPC; the Ethereum ones assert chain id 1 directly,
+there being only one. This matters on both sides because the two networks share contract
+addresses (same deployer, same nonces).
+
+| Step | 0G chain | Ethereum |
+|------|----------|----------|
+| 1. Upgrade keys | `transferZgBeacons(uint256,address)` | `transferEthBeacons(address)` |
+| 2. Grant admin | `grantZgAdmins(uint256,address)` | `grantEthAdmins(address)` |
+| 3. Drop deployer | `revokeZgDeployer(uint256,address,address)` | `revokeEthDeployer(address)` |
+
+The 0G arguments are `(chainId, multisig)` and, for step 3, `(chainId, multisig, committer)`;
+the signatures above are the strings `forge script --sig` expects.
+
+Steps 2 and 3 are separate transactions on purpose, so the grant can be confirmed on chain
+before the deployer gives up access. Step 3 refuses to run unless the multisig already holds
+`DEFAULT_ADMIN_ROLE`, because revoking the last admin of an `AccessControl` contract cannot be
+undone. That check on its own does not catch a mistyped multisig — the same wrong address would
+have been granted the role in step 2 and would satisfy it — so every address receiving authority
+in these steps must also have contract code. The account being revoked is derived from the
+signing key rather than passed in — and printed, since a wrong key in the environment would
+otherwise make step 3 find nothing to revoke and exit reporting success. `revokeZgDeployer` also
+requires the named committer to already hold `UPDATE_ROLE`, so that dropping the deployer's copy
+cannot leave the role with no holder; it forces the operator to name the key they believe is
+submitting, but only the sender of recent `RestakingStates` updates proves that key is in use.
+
+The operational roles are deliberately left in place: `UPDATE_ROLE` belongs to the committer hot
+key, `DISTRIBUTOR_ROLE` to the distributor bot, and `REGISTER_OPERATOR_ROLE` to the factory
+contract itself — a multisig cannot serve any of the three. `grantRoleTo` / `revokeRoleFrom` /
+`transferBeacon` cover single-target corrections, such as rotating the committer key or keeping a
+fast hot `PAUSER_ROLE` alongside the multisig. `grantRoleTo` accepts an EOA for exactly that
+reason, except for `DEFAULT_ADMIN_ROLE`, where the batch-step rule applies so that these entry
+points cannot be used to route around it; `transferBeacon` moves an upgrade key and so requires
+contract code like the batch steps do.
+
+**Not covered: the VetoSlasher resolver.** `createValidator` sets each new vault's veto resolver
+to the address in `InitParams.resolver`, which the deployment scripts set to the deploying EOA.
+That resolver can veto any slash within the veto window. `VetoSlasher.setResolver` only accepts
+calls from the registered network — the factory — and the factory only calls it while creating a
+vault, so existing vaults keep their current resolver no matter what the handover does. Moving
+theirs requires a factory upgrade that exposes a resolver setter.
+
+`setParams` is a different matter: it is gated by `DEFAULT_ADMIN_ROLE` and changes the resolver
+handed to vaults created later, so after the handover the multisig can point it at itself. Doing
+so freezes how many vaults have their veto on an EOA instead of letting the number grow with each
+new validator. Until both are done the veto path stays with the deploying EOA, and the handover
+should not be described as complete.
+
 ## Reward Distribution Model
 
 The Rewarder uses an **accumulative reward per share** pattern (similar to MasterChef):
