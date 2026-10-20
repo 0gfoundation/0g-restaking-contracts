@@ -30,6 +30,9 @@ contract AscendRouterScript is Script, JsonUtils {
 
         vm.startBroadcast(privKey);
 
+        // Keep whatever else the record already holds (the OracleUpdater entries among them).
+        vm.serializeJson(obj, json);
+
         // Deploy AscendRouter implementation contract
         AscendRouter routerImpl = new AscendRouter();
         // Deploy upgradeable beacon

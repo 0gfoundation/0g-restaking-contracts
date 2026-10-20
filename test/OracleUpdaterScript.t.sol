@@ -15,22 +15,22 @@ import {Token} from "./mocks/Token.sol";
 contract AdminMultisigStub {}
 
 contract OracleUpdaterScriptTest is Test, AscendRouterScript {
-    // A chain id of its own keeps this record apart from the ascend record Ownership.t.sol writes
-    // into the same directory.
-    uint256 internal constant CHAIN_ID = 99_661;
+    // Chain ids of their own keep these records apart from the ascend record Ownership.t.sol
+    // writes into the same directory, and from each other: forge runs the tests of one contract
+    // concurrently, and the record file is named by chain id.
+    uint256 internal constant DEPLOY_CHAIN_ID = 99_661;
+    uint256 internal constant EOA_ADMIN_CHAIN_ID = 99_662;
 
-    string internal path;
+    string internal dir;
     address internal deployer;
     address internal safe;
     address internal operator;
     MockMellowSourceCore internal core;
 
     function setUp() public {
-        vm.chainId(CHAIN_ID);
-
         // The directory and the label-derived key are the values Ownership.t.sol sets: both are
         // process-wide environment variables, and the suites may run concurrently.
-        string memory dir = string.concat(vm.projectRoot(), "/out/ownership-test");
+        dir = string.concat(vm.projectRoot(), "/out/ownership-test");
         vm.createDir(dir, true);
         vm.setEnv("DEPLOYMENT_PATH", dir);
         uint256 deployerKey;
@@ -43,8 +43,11 @@ contract OracleUpdaterScriptTest is Test, AscendRouterScript {
         core = new MockMellowSourceCore(w0g, makeAddr("adapter"), makeAddr("queue"), safe);
         w0g.approve(address(core), 1 ether);
         core.deposit(1 ether);
+    }
 
-        path = string.concat(dir, "/ascend-", vm.toString(CHAIN_ID), ".json");
+    function _writeRecord(uint256 chainId, address admin) internal returns (string memory path) {
+        vm.chainId(chainId);
+        path = string.concat(dir, "/ascend-", vm.toString(chainId), ".json");
         vm.writeFile(
             path,
             string.concat(
@@ -53,7 +56,7 @@ contract OracleUpdaterScriptTest is Test, AscendRouterScript {
                 '"MellowVault":"',
                 vm.toString(address(core)),
                 '","OracleUpdaterAdmin":"',
-                vm.toString(safe),
+                vm.toString(admin),
                 '","OracleUpdaterOperator":"',
                 vm.toString(operator),
                 '"}'
@@ -62,6 +65,7 @@ contract OracleUpdaterScriptTest is Test, AscendRouterScript {
     }
 
     function test_DeployOracleUpdater() public {
+        string memory path = _writeRecord(DEPLOY_CHAIN_ID, safe);
         deployOracleUpdater();
 
         string memory json = vm.readFile(path);
@@ -83,8 +87,7 @@ contract OracleUpdaterScriptTest is Test, AscendRouterScript {
     }
 
     function test_DeployRejectsEoaAdmin() public {
-        string memory json = vm.readFile(path);
-        vm.writeFile(path, vm.replace(json, vm.toString(safe), vm.toString(makeAddr("eoaAdmin"))));
+        _writeRecord(EOA_ADMIN_CHAIN_ID, makeAddr("eoaAdmin"));
         vm.expectRevert("OracleUpdaterAdmin must be a multisig contract");
         this.deployOracleUpdater();
     }
