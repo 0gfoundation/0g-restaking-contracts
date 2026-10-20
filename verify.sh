@@ -66,6 +66,11 @@ else
   forge verify-contract $AscendRouter BeaconProxy --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID
   forge verify-contract $AscendRouterBeacon UpgradeableBeacon --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID
   forge verify-contract $AscendRouterImpl AscendRouter --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID
+  if [ -n "$OracleUpdater" ]; then
+    forge verify-contract $OracleUpdater BeaconProxy --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID
+    forge verify-contract $OracleUpdaterBeacon UpgradeableBeacon --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID
+    forge verify-contract $OracleUpdaterImpl OracleUpdater --verifier custom --verifier-api-key $VERIFIER_KEY --verifier-url $VERIFIER_URL --chain $CHAIN_ID
+  fi
 
 
 fi

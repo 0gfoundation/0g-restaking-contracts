@@ -6,6 +6,8 @@ import {BeaconProxy} from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol"
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import {JsonUtils} from "./Utils.s.sol";
 import {AscendRouter} from "../../src/ascend/AscendRouter.sol";
+import {OracleUpdater} from "../../src/ascend/OracleUpdater.sol";
+import {IMellowSourceCore} from "../../src/interfaces/IMellowSourceCore.sol";
 import {Rewarder} from "../../src/Rewarder.sol";
 
 contract AscendRouterScript is Script, JsonUtils {
@@ -188,5 +190,74 @@ contract AscendRouterScript is Script, JsonUtils {
         console2.log("AscendRouter parameters updated successfully");
 
         vm.stopBroadcast();
+    }
+
+    /// @notice Deploy the OracleUpdater for the aOG vault recorded as `MellowVault`.
+    /// @dev Reads `OracleUpdaterAdmin` (the vault's admin multisig, which becomes both the beacon
+    ///      owner and the proxy's admin) and `OracleUpdaterOperator` (the account that writes the
+    ///      oracle) from the ascend JSON, and records the deployed addresses back into it. The
+    ///      broadcasting key is left with no role and no ownership. Granting the updater the
+    ///      oracle's SET_VALUE_ROLE is a separate multisig transaction on the SourceCore.
+    function deployOracleUpdater() public virtual {
+        uint256 privKey = vm.envUint("PRIVATE_KEY_0G");
+
+        string memory obj = "ascend";
+
+        (string memory json, string memory path) = loadOrInitJson(obj);
+
+        address sourceCore = vm.parseJsonAddress(json, ".MellowVault");
+        address admin = vm.parseJsonAddress(json, ".OracleUpdaterAdmin");
+        address operator = vm.parseJsonAddress(json, ".OracleUpdaterOperator");
+        require(admin.code.length > 0, "OracleUpdaterAdmin must be a multisig contract");
+
+        vm.startBroadcast(privKey);
+        (address impl, address beacon, address proxy) = deployOracleUpdaterContracts(sourceCore, admin, operator);
+        vm.stopBroadcast();
+
+        checkOracleUpdater(proxy, beacon, sourceCore, admin, operator, vm.addr(privKey));
+
+        vm.serializeJson(obj, json);
+        vm.serializeAddress(obj, "OracleUpdaterImpl", impl);
+        vm.serializeAddress(obj, "OracleUpdaterBeacon", beacon);
+        string memory finalJson = vm.serializeAddress(obj, "OracleUpdater", proxy);
+        vm.writeJson(finalJson, path);
+
+        console2.log("OracleUpdater:", proxy);
+        console2.log("OracleUpdater maxValue:", OracleUpdater(proxy).maxValue());
+        console2.log("Oracle value:", IMellowSourceCore(sourceCore).oracle().value());
+    }
+
+    function deployOracleUpdaterContracts(
+        address sourceCore,
+        address admin,
+        address operator
+    ) internal returns (address impl, address beacon, address proxy) {
+        impl = address(new OracleUpdater());
+        beacon = address(new UpgradeableBeacon(impl, admin));
+        proxy =
+            address(new BeaconProxy(beacon, abi.encodeCall(OracleUpdater.initialize, (sourceCore, admin, operator))));
+    }
+
+    function checkOracleUpdater(
+        address proxy,
+        address beacon,
+        address sourceCore,
+        address admin,
+        address operator,
+        address deployer
+    ) internal view {
+        OracleUpdater updater = OracleUpdater(proxy);
+        require(UpgradeableBeacon(beacon).owner() == admin, "beacon owner is not the admin");
+        require(address(updater.sourceCore()) == sourceCore, "wrong source core");
+        require(updater.hasRole(updater.DEFAULT_ADMIN_ROLE(), admin), "admin role missing");
+        require(updater.hasRole(updater.UPDATER_ROLE(), operator), "updater role missing");
+        if (deployer != admin && deployer != operator) {
+            require(!updater.hasRole(updater.DEFAULT_ADMIN_ROLE(), deployer), "deployer kept admin");
+            require(!updater.hasRole(updater.UPDATER_ROLE(), deployer), "deployer kept updater");
+        }
+        require(
+            updater.maxValue() >= IMellowSourceCore(sourceCore).oracle().value(),
+            "oracle value is above the on-chain NAV"
+        );
     }
 }
