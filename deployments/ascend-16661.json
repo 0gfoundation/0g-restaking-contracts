@@ -6,6 +6,11 @@
   "FoundationPercentage": 100000000000000000,
   "MellowVault": "0x4B3c2f55fa67679b382c979A082Df1B32079B4cB",
   "MellowVaultPercentage": 900000000000000000,
+  "OracleUpdater": "0xa57e348Afb83153cE2aB27210FFB35c9860B3A42",
+  "OracleUpdaterAdmin": "0xfc7350b0d7a358Db58875148faF3bDEAaFC82911",
+  "OracleUpdaterBeacon": "0xbec2A0986A8ab186934237e448Da154c35e4565A",
+  "OracleUpdaterImpl": "0xbEceeB5fBdf4b7a876e0D13B71D507208BA15872",
+  "OracleUpdaterOperator": "0xc0412361882961570d79CE535cB26Fc71bf363A7",
   "PaymentLayer": "0x0000000000000000000000000000000000000000",
   "PaymentLayerPercentage": 0,
   "WETH": "0x1Cd0690fF9a693f5EF2dD976660a8dAFc81A109c"

@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.25;
+
+import {Test} from "forge-std/Test.sol";
+
+import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+
+import {OracleUpdater} from "../src/ascend/OracleUpdater.sol";
+
+import {AscendRouterScript} from "../script/deploy/Ascend.s.sol";
+
+import {MockMellowSourceCore} from "./mocks/MockMellowSourceCore.sol";
+import {Token} from "./mocks/Token.sol";
+
+contract AdminMultisigStub {}
+
+contract OracleUpdaterScriptTest is Test, AscendRouterScript {
+    // Chain ids of their own keep these records apart from the ascend record Ownership.t.sol
+    // writes into the same directory, and from each other: forge runs the tests of one contract
+    // concurrently, and the record file is named by chain id.
+    uint256 internal constant DEPLOY_CHAIN_ID = 99_661;
+    uint256 internal constant EOA_ADMIN_CHAIN_ID = 99_662;
+
+    string internal dir;
+    address internal deployer;
+    address internal safe;
+    address internal operator;
+    MockMellowSourceCore internal core;
+
+    function setUp() public {
+        // The directory and the label-derived key are the values Ownership.t.sol sets: both are
+        // process-wide environment variables, and the suites may run concurrently.
+        dir = string.concat(vm.projectRoot(), "/out/ownership-test");
+        vm.createDir(dir, true);
+        vm.setEnv("DEPLOYMENT_PATH", dir);
+        uint256 deployerKey;
+        (deployer, deployerKey) = makeAddrAndKey("zgDeployer");
+        vm.setEnv("PRIVATE_KEY_0G", vm.toString(deployerKey));
+
+        safe = address(new AdminMultisigStub());
+        operator = makeAddr("operator");
+        Token w0g = new Token("W0G");
+        core = new MockMellowSourceCore(w0g, makeAddr("adapter"), makeAddr("queue"), safe);
+        w0g.approve(address(core), 1 ether);
+        core.deposit(1 ether);
+    }
+
+    function _writeRecord(uint256 chainId, address admin) internal returns (string memory path) {
+        vm.chainId(chainId);
+        path = string.concat(dir, "/ascend-", vm.toString(chainId), ".json");
+        vm.writeFile(
+            path,
+            string.concat(
+                '{"AscendRouter":"0x4af366C80Eb17F24923fE956Cc21A11A6864B33a",',
+                '"MellowVaultPercentage":900000000000000000,',
+                '"MellowVault":"',
+                vm.toString(address(core)),
+                '","OracleUpdaterAdmin":"',
+                vm.toString(admin),
+                '","OracleUpdaterOperator":"',
+                vm.toString(operator),
+                '"}'
+            )
+        );
+    }
+
+    function test_DeployOracleUpdater() public {
+        string memory path = _writeRecord(DEPLOY_CHAIN_ID, safe);
+        deployOracleUpdater();
+
+        string memory json = vm.readFile(path);
+        OracleUpdater updater = OracleUpdater(vm.parseJsonAddress(json, ".OracleUpdater"));
+        UpgradeableBeacon beacon = UpgradeableBeacon(vm.parseJsonAddress(json, ".OracleUpdaterBeacon"));
+
+        assertEq(beacon.implementation(), vm.parseJsonAddress(json, ".OracleUpdaterImpl"));
+        assertEq(beacon.owner(), safe);
+        assertEq(address(updater.sourceCore()), address(core));
+        assertTrue(updater.hasRole(updater.DEFAULT_ADMIN_ROLE(), safe));
+        assertTrue(updater.hasRole(updater.UPDATER_ROLE(), operator));
+        assertFalse(updater.hasRole(updater.DEFAULT_ADMIN_ROLE(), deployer));
+        assertFalse(updater.hasRole(updater.UPDATER_ROLE(), deployer));
+
+        // Existing entries survive the rewrite, numbers included.
+        assertEq(vm.parseJsonAddress(json, ".AscendRouter"), 0x4af366C80Eb17F24923fE956Cc21A11A6864B33a);
+        assertEq(vm.parseJsonUint(json, ".MellowVaultPercentage"), 900_000_000_000_000_000);
+        assertEq(vm.parseJsonAddress(json, ".OracleUpdaterOperator"), operator);
+    }
+
+    function test_DeployRejectsEoaAdmin() public {
+        _writeRecord(EOA_ADMIN_CHAIN_ID, makeAddr("eoaAdmin"));
+        vm.expectRevert("OracleUpdaterAdmin must be a multisig contract");
+        this.deployOracleUpdater();
+    }
+}

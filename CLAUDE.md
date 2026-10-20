@@ -55,6 +55,7 @@ git submodule update --init --recursive
 
 - **WeightedStakePower** (`src/WeightedStakePower.sol`): Converts stake to voting power using collateral-specific weights with checkpoint history.
 - **AscendRouter** (`src/ascend/AscendRouter.sol`): Payment splitting router distributing funds to multiple receivers.
+- **OracleUpdater** (`src/ascend/OracleUpdater.sol`): Bounded writer for the aOG vault's share-price oracle (mellow-interop `Oracle`). Holds the oracle's `SET_VALUE_ROLE` and forwards `setValue(v)` from `UPDATER_ROLE` only when `oracle.value() <= v <= maxValue()`, where `maxValue()` is (W0G in SourceCore + W0G locked in its OFT adapter) / aOG supply. Lowering the price stays with the vault-admin multisig writing the oracle directly. Deploy with `forge script script/deploy/Ascend.s.sol --sig "deployOracleUpdater()"`; inputs and outputs live in `deployments/ascend-<chainId>.json`. `test/OracleUpdaterFork.t.sol` rehearses the mainnet handover when `ZG_FORK_RPC` is set.
 - **PauseControl** (`src/security/PauseControl.sol`): Emergency pause functionality.
 
 ### Satellite Chains
